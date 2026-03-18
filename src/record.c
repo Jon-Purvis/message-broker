@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "record.h"
+#include "../include/record.h"
 
 
 int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
