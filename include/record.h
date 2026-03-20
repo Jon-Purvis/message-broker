@@ -2,6 +2,7 @@
 #define RECORD_H
 
 #include <stdint.h>
+#include <unistd.h>
 
 struct record_header
 {
@@ -23,10 +24,10 @@ int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
 void record_destroy(struct record *record);
 
 // serialize into caller-provided buffer, returns bytes written or -1
-int record_serialize(const struct record *record, void *buf, uint32_t buf_len);
+ssize_t record_serialize(const struct record *record, void *buf, size_t buf_len);
 
 // deserialize from buffer, returns bytes consumed or -1
-int record_deserialize(struct record *record, const void *buf, uint32_t buf_len);
+ssize_t record_deserialize(struct record *record, const void *buf, size_t buf_len);
 
 #endif
 

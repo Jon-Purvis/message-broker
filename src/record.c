@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -33,7 +34,7 @@ void record_destroy(struct record *record)
 }
 
 // serialize into caller-provided buffer, returns bytes written or -1
-int record_serialize(const struct record *record, void *buf, uint32_t buf_len)
+ssize_t record_serialize(const struct record *record, void *buf, size_t buf_len)
 {
 	if (record == NULL) return -1;
 	if (record->value == NULL) return -1;
@@ -52,7 +53,7 @@ int record_serialize(const struct record *record, void *buf, uint32_t buf_len)
 }
 
 // deserialize from buffer, returns bytes consumed or -1
-int record_deserialize(struct record *record, const void *buf, uint32_t buf_len)
+ssize_t record_deserialize(struct record *record, const void *buf, size_t buf_len)
 {
 	if (record == NULL) return -1;
 	if (buf == NULL) return -1;
