@@ -25,14 +25,11 @@ int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
 	return 0;
 }
 
-int record_free(struct record *record) 
+void record_destroy(struct record *record) 
 {
-	if (record == NULL) return -1;
-	if (record->value == NULL) return -1;
-
+	if (record == NULL) return;
 	free(record->value);
 	record->value = NULL;
-	return 0;
 }
 
 // serialize into caller-provided buffer, returns bytes written or -1

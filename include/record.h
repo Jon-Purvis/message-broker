@@ -20,7 +20,7 @@ struct record
 int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
 		uint32_t value_length, const void *value);
 
-int record_free(struct record *record);
+void record_destroy(struct record *record);
 
 // serialize into caller-provided buffer, returns bytes written or -1
 int record_serialize(const struct record *record, void *buf, uint32_t buf_len);
