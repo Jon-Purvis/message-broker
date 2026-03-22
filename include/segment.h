@@ -3,15 +3,23 @@
 
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/types.h>
 
 #include "record.h"
 
 /* currently hardcoded 64 MB. Pulled from config file later. */
 #define SEGMENT_MAX_BYTES (1024 * 1024 * 64)
 
-#define SEGMENT_OK 0
-#define SEGMENT_ERR -1
-#define SEGMENT_FULL -2
+#define SEGMENT_OK          0
+#define SEGMENT_ERR        -1
+#define SEGMENT_FULL       -2
+#define SEGMENT_NOT_FOUND  -3
+#define SEGMENT_IO_ERR     -4
+
+struct index_entry {
+	uint64_t offset;
+	off_t position;
+};
 
 struct segment
 {

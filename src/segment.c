@@ -1,21 +1,112 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
-
 #include <fcntl.h>
 #include <unistd.h>
+#include <stddef.h>
 
 #include "../include/segment.h"
 #include "../include/record.h"
 
-static int segment_write_index(struct segment *segment, off_t physical_position);
-
-static int write_all(int fd, void *buf, size_t buf_len);
-
-int segment_init(struct segment *segment, uint64_t base_offset,
-		const char *log_file_path, const char *index_file_path)
+/*
+ * ----------------------------------------------------------------------------
+ * PRIVATE HELPER METHODS
+ * ----------------------------------------------------------------------------
+ */
+static int write_all(int fd, const void *buf, size_t buf_len)
 {
-	if (segment == NULL) return SEGMENT_ERR;
+	size_t written = 0;
+	ssize_t res;
+
+	while (written < buf_len) {
+		res = write(fd, (const char *)buf + written, buf_len - written);
+		if (res <= 0) return SEGMENT_IO_ERR;
+		written += (size_t)res;
+	}
+	return SEGMENT_OK;
+}
+
+static int segment_write_index(struct segment *segment, off_t physical_position)
+{
+	struct index_entry entry = {
+		.offset = segment->current_offset,
+		.position = physical_position
+	};
+
+	return write_all(segment->index_fd, &entry, sizeof(entry));
+}
+
+static int get_index_entry(struct segment *segment, int64_t index,
+		struct index_entry *entry)
+{
+	ssize_t res;
+	size_t entry_size = sizeof(struct index_entry);
+
+	res = pread(segment->index_fd, entry, entry_size, (off_t)(index * entry_size));
+	if (res != (ssize_t)entry_size)
+		return SEGMENT_IO_ERR;
+
+	return SEGMENT_OK;
+}
+
+static int read_from_log(struct segment *segment, struct record *record, off_t position)
+{
+	ssize_t result = pread(segment->log_fd, &record->header, sizeof(record->header), position);
+	if (result != sizeof(record->header))
+		return SEGMENT_IO_ERR;
+
+	record->value = malloc(record->header.value_length);
+	if (!record->value)
+		return SEGMENT_ERR;
+
+	off_t v_pos = position + (off_t)sizeof(struct record_header);
+	result = pread(segment->log_fd, record->value, record->header.value_length, v_pos);
+	if (result != (ssize_t)record->header.value_length) {
+		free(record->value);
+		record->value = NULL;
+		return SEGMENT_IO_ERR;
+	}
+
+	return SEGMENT_OK;
+}
+
+static int segment_find_position(struct segment *segment, uint64_t target,
+		off_t *out_position)
+{
+	size_t total = segment->current_offset - segment->base_offset;
+	int64_t low = 0;
+	int64_t high = (int64_t)total - 1;
+
+	while (low <= high) {
+		/* safe midpoint calculation that prevents possible overflow */
+		int64_t mid = low + (high - low) / 2;
+		struct index_entry entry;
+
+		if (get_index_entry(segment, mid, &entry) != SEGMENT_OK)
+			return SEGMENT_ERR;
+
+		if (target > entry.offset)
+			low = mid + 1;
+		else if (target < entry.offset)
+			high = mid - 1;
+		else {
+			*out_position = entry.position;
+			return SEGMENT_OK;
+		}
+	}
+	return SEGMENT_NOT_FOUND;
+}
+
+/*
+ * ----------------------------------------------------------------------------
+ * PUBLIC API METHODS
+ * ----------------------------------------------------------------------------
+ */
+int segment_init(struct segment *segment, uint64_t base_offset,
+		const char *log_path, const char *index_path)
+{
+	if (!segment)
+		return SEGMENT_ERR;
 
 	segment->log_file_path = NULL;
 	segment->index_file_path = NULL;
@@ -26,21 +117,22 @@ int segment_init(struct segment *segment, uint64_t base_offset,
 	segment->base_offset = base_offset;
 	segment->current_offset = base_offset;
 
-	segment->log_file_path = strdup(log_file_path);
-	if (segment->log_file_path == NULL) goto fail;
-	segment->index_file_path = strdup(index_file_path);
-	if (segment->index_file_path == NULL) goto fail;
+	segment->log_file_path = strdup(log_path);
+	segment->index_file_path = strdup(index_path);
+
+	if (!segment->log_file_path || !segment->index_file_path)
+		goto fail;
 
 	segment->log_fd = open(segment->log_file_path,
-			O_CREAT | O_APPEND | O_RDWR,
-			S_IRUSR | S_IWUSR);
-	if (segment->log_fd == -1) goto fail;
+			O_CREAT | O_APPEND | O_RDWR, S_IRUSR | S_IWUSR);
 	segment->index_fd = open(segment->index_file_path,
-			O_CREAT | O_RDWR,
-			S_IRUSR | S_IWUSR);
-	if (segment->index_fd == -1) goto fail;
+			O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
+
+	if (segment->log_fd == -1 || segment->index_fd == -1)
+		goto fail;
 
 	return SEGMENT_OK;
+
 fail:
 	segment_destroy(segment);
 	return SEGMENT_ERR;
@@ -48,94 +140,66 @@ fail:
 
 void segment_destroy(struct segment *segment)
 {
-	if (segment == NULL) return;
+	if (!segment)
+		return;
+
 	if (segment->log_fd != -1) close(segment->log_fd);
 	if (segment->index_fd != -1) close(segment->index_fd);
+
 	free(segment->log_file_path);
 	free(segment->index_file_path);
 }
 
 int segment_append(struct segment *segment, const struct record *record)
 {
-	if (segment == NULL) return SEGMENT_ERR;
-	if (record == NULL) return SEGMENT_ERR;
-	if (record->value == NULL) return SEGMENT_ERR;
+	if (!segment || !record || !record->value)
+		return SEGMENT_ERR;
 
-	if (segment->segment_size >= SEGMENT_MAX_BYTES) return SEGMENT_FULL;
+	if (segment->segment_size >= SEGMENT_MAX_BYTES)
+		return SEGMENT_FULL;
 
-	size_t buf_len = sizeof(struct record_header) + record->header.value_length;
-	void *buf = malloc(buf_len);
-	if (buf == NULL) return SEGMENT_ERR;
+	size_t len = sizeof(struct record_header) + record->header.value_length;
+	void *buf = malloc(len);
+	if (!buf)
+		return SEGMENT_ERR;
 
-	ssize_t bytes_written = record_serialize(record, buf, buf_len);
-	if (bytes_written == -1) {
+	if (record_serialize(record, buf, len) == -1) {
 		free(buf);
 		return SEGMENT_ERR;
 	}
 
 	off_t physical_position = (off_t)segment->segment_size;
 
-	if (write_all(segment->log_fd, buf, buf_len) == SEGMENT_ERR) {
+	if (write_all(segment->log_fd, buf, len) == SEGMENT_ERR) {
 		free(buf);
 		return SEGMENT_ERR;
-
 	}
 
-	/* possible issue here: if this index write fails, then
-	 * the log will a record that will be impossible to read becuase
-	 * it won't be recorded in the index
-	 */
 	if (segment_write_index(segment, physical_position) == SEGMENT_ERR) {
 		free(buf);
 		return SEGMENT_ERR;
 	}
 
-	segment->segment_size += buf_len;
+	segment->segment_size += len;
 	segment->current_offset += 1;
 
 	free(buf);
 	return SEGMENT_OK;
 }
 
-static int segment_write_index(struct segment *segment, off_t physical_position)
+int segment_read(struct segment *segment, struct record *record,
+		uint64_t target_offset)
 {
-	size_t buf_len = sizeof(uint64_t) + sizeof(physical_position);
-	void *buf = malloc(buf_len);
-	if (buf == NULL) return SEGMENT_ERR;
+	off_t pos;
+	int res;
 
-	char *p = buf;
-	memcpy(p, &segment->current_offset, sizeof(uint64_t));
-	p += sizeof(uint64_t);
-	memcpy(p, &physical_position, sizeof(physical_position));
-	p += sizeof(physical_position);
-
-	if (write_all(segment->index_fd, buf, buf_len) == SEGMENT_ERR) {
-		free(buf);
+	if (!segment || !record)
 		return SEGMENT_ERR;
-	}
 
-	free(buf);
-	return SEGMENT_OK;
+	res = segment_find_position(segment, target_offset, &pos);
+	if (res != SEGMENT_OK)
+		return res;
+
+	return read_from_log(segment, record, pos);
 }
-
-static int write_all(int fd, void *buf, size_t buf_len)
-{
-	size_t total_written = 0;
-	while (total_written < buf_len) {
-		ssize_t bytes_written = write(fd,
-				(char *)buf + total_written,
-				buf_len - total_written);
-		if (bytes_written == -1) {
-			return SEGMENT_ERR;
-		}
-		total_written += bytes_written;
-	}
-	return SEGMENT_OK;
-}
-
-int segment_read(struct segment *segment, struct record *record, uint64_t offset)
-{
-
-}
-
 
