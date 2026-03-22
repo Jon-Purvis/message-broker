@@ -39,11 +39,11 @@ static int segment_write_index(struct segment *segment, off_t physical_position)
 static int get_index_entry(struct segment *segment, int64_t index,
 		struct index_entry *entry)
 {
-	ssize_t res;
+	ssize_t result;
 	size_t entry_size = sizeof(struct index_entry);
 
-	res = pread(segment->index_fd, entry, entry_size, (off_t)(index * entry_size));
-	if (res != (ssize_t)entry_size)
+	result = pread(segment->index_fd, entry, entry_size, (off_t)(index * entry_size));
+	if (result != (ssize_t)entry_size)
 		return SEGMENT_IO_ERR;
 
 	return SEGMENT_OK;
@@ -83,7 +83,7 @@ static int segment_find_position(struct segment *segment, uint64_t target,
 		struct index_entry entry;
 
 		if (get_index_entry(segment, mid, &entry) != SEGMENT_OK)
-			return SEGMENT_ERR;
+			return SEGMENT_IO_ERR;
 
 		if (target > entry.offset)
 			low = mid + 1;
@@ -148,6 +148,11 @@ void segment_destroy(struct segment *segment)
 
 	free(segment->log_file_path);
 	free(segment->index_file_path);
+
+	segment->log_fd = -1;
+	segment->index_fd = -1;
+	segment->log_file_path = NULL;
+	segment->index_file_path = NULL;
 }
 
 int segment_append(struct segment *segment, const struct record *record)
@@ -170,14 +175,14 @@ int segment_append(struct segment *segment, const struct record *record)
 
 	off_t physical_position = (off_t)segment->segment_size;
 
-	if (write_all(segment->log_fd, buf, len) == SEGMENT_ERR) {
+	if (write_all(segment->log_fd, buf, len) != SEGMENT_OK) {
 		free(buf);
-		return SEGMENT_ERR;
+		return SEGMENT_IO_ERR;
 	}
 
-	if (segment_write_index(segment, physical_position) == SEGMENT_ERR) {
+	if (segment_write_index(segment, physical_position) != SEGMENT_OK) {
 		free(buf);
-		return SEGMENT_ERR;
+		return SEGMENT_IO_ERR;
 	}
 
 	segment->segment_size += len;
@@ -190,16 +195,16 @@ int segment_append(struct segment *segment, const struct record *record)
 int segment_read(struct segment *segment, struct record *record,
 		uint64_t target_offset)
 {
-	off_t pos;
-	int res;
+	off_t position;
+	int result;
 
 	if (!segment || !record)
 		return SEGMENT_ERR;
 
-	res = segment_find_position(segment, target_offset, &pos);
-	if (res != SEGMENT_OK)
-		return res;
+	result = segment_find_position(segment, target_offset, &position);
+	if (result != SEGMENT_OK)
+		return result;
 
-	return read_from_log(segment, record, pos);
+	return read_from_log(segment, record, position);
 }
 
