@@ -59,8 +59,8 @@ static int read_from_log(struct segment *segment, struct record *record, off_t p
 	if (!record->value)
 		return SEGMENT_ERR;
 
-	off_t v_pos = position + (off_t)sizeof(struct record_header);
-	result = pread(segment->log_fd, record->value, record->header.value_length, v_pos);
+	off_t value_position = position + (off_t)sizeof(struct record_header);
+	result = pread(segment->log_fd, record->value, record->header.value_length, value_position);
 	if (result != (ssize_t)record->header.value_length) {
 		free(record->value);
 		record->value = NULL;
