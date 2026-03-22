@@ -4,16 +4,14 @@
 #include <stdint.h>
 #include <unistd.h>
 
-struct record_header
-{
+struct record_header {
 	uint64_t timestamp;
 	uint64_t offset;
 	uint32_t crc;
 	uint32_t value_length;
 };
 
-struct record
-{
+struct record {
 	struct record_header header;
 	void *value;
 };

@@ -21,8 +21,7 @@ struct index_entry {
 	off_t position;
 };
 
-struct segment
-{
+struct segment {
 	size_t segment_size;
 	uint64_t base_offset;
 	uint64_t current_offset;
