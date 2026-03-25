@@ -37,8 +37,7 @@ ssize_t record_serialize(const struct record *record, void *buf, size_t buf_len)
 	size_t total_len;
 	char *p = (char *)buf;
 
-	if (!record || !record->value || !buf)
-		return -1;
+	if (!record || !record->value || !buf) return -1;
 
 	total_len = sizeof(struct record_header) + record->header.value_length;
 	if (buf_len < total_len) return -1;
@@ -54,7 +53,7 @@ ssize_t record_serialize(const struct record *record, void *buf, size_t buf_len)
 
 ssize_t record_deserialize(struct record *record, const void *buf, size_t buf_len)
 {
-	if (!record || !buf || buf_len < sizeof(struct record_header)) 
+	if (!record || !buf || buf_len < sizeof(struct record_header))
 		return -1;
 
 	const char *p = (char *)buf;

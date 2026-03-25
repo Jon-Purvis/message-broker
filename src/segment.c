@@ -43,8 +43,7 @@ static int get_index_entry(struct segment *segment, int64_t index,
 	size_t entry_size = sizeof(struct index_entry);
 
 	result = pread(segment->index_fd, entry, entry_size, (off_t)(index * entry_size));
-	if (result != (ssize_t)entry_size)
-		return SEGMENT_IO_ERR;
+	if (result != (ssize_t)entry_size) return SEGMENT_IO_ERR;
 
 	return SEGMENT_OK;
 }
@@ -52,12 +51,10 @@ static int get_index_entry(struct segment *segment, int64_t index,
 static int read_from_log(struct segment *segment, struct record *record, off_t position)
 {
 	ssize_t result = pread(segment->log_fd, &record->header, sizeof(record->header), position);
-	if (result != sizeof(record->header))
-		return SEGMENT_IO_ERR;
+	if (result != sizeof(record->header)) return SEGMENT_IO_ERR;
 
 	record->value = malloc(record->header.value_length);
-	if (!record->value)
-		return SEGMENT_ERR;
+	if (!record->value) return SEGMENT_ERR;
 
 	off_t value_position = position + (off_t)sizeof(struct record_header);
 	result = pread(segment->log_fd, record->value, record->header.value_length, value_position);
@@ -105,8 +102,7 @@ static int segment_find_position(struct segment *segment, uint64_t target,
 int segment_init(struct segment *segment, uint64_t base_offset,
 		const char *log_path, const char *index_path)
 {
-	if (!segment)
-		return SEGMENT_ERR;
+	if (!segment) return SEGMENT_ERR;
 
 	segment->log_file_path = NULL;
 	segment->index_file_path = NULL;
@@ -120,16 +116,14 @@ int segment_init(struct segment *segment, uint64_t base_offset,
 	segment->log_file_path = strdup(log_path);
 	segment->index_file_path = strdup(index_path);
 
-	if (!segment->log_file_path || !segment->index_file_path)
-		goto fail;
+	if (!segment->log_file_path || !segment->index_file_path) goto fail;
 
 	segment->log_fd = open(segment->log_file_path,
 			O_CREAT | O_APPEND | O_RDWR, S_IRUSR | S_IWUSR);
 	segment->index_fd = open(segment->index_file_path,
 			O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 
-	if (segment->log_fd == -1 || segment->index_fd == -1)
-		goto fail;
+	if (segment->log_fd == -1 || segment->index_fd == -1) goto fail;
 
 	return SEGMENT_OK;
 
@@ -140,8 +134,7 @@ fail:
 
 void segment_destroy(struct segment *segment)
 {
-	if (!segment)
-		return;
+	if (!segment) return;
 
 	if (segment->log_fd != -1) close(segment->log_fd);
 	if (segment->index_fd != -1) close(segment->index_fd);
@@ -165,8 +158,7 @@ int segment_append(struct segment *segment, const struct record *record)
 
 	size_t len = sizeof(struct record_header) + record->header.value_length;
 	void *buf = malloc(len);
-	if (!buf)
-		return SEGMENT_ERR;
+	if (!buf) return SEGMENT_ERR;
 
 	if (record_serialize(record, buf, len) == -1) {
 		free(buf);
