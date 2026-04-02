@@ -13,6 +13,22 @@
  * PRIVATE HELPER METHODS
  * ----------------------------------------------------------------------------
  */
+
+static int segment_recover(struct segment *segment)
+{
+	off_t log_size = lseek(segment->log_fd, 0, SEEK_END);
+	if (log_size == -1) return SEGMENT_IO_ERR;
+	segment->segment_size = (size_t)log_size;
+
+	off_t index_size = lseek(segment->index_fd, 0, SEEK_END);
+	if (index_size == -1) return SEGMENT_IO_ERR;
+
+	uint64_t num_entries = (uint64_t)index_size / sizeof(struct index_entry);
+	segment->current_offset = segment->base_offset + num_entries;
+
+	return SEGMENT_OK;
+}
+
 static int write_all(int fd, const void *buf, size_t buf_len)
 {
 	size_t written = 0;
@@ -124,6 +140,8 @@ int segment_init(struct segment *segment, uint64_t base_offset,
 			O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
 
 	if (segment->log_fd == -1 || segment->index_fd == -1) goto fail;
+
+	if (segment_recover(segment) != SEGMENT_OK) goto fail;
 
 	return SEGMENT_OK;
 
