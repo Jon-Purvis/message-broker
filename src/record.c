@@ -5,7 +5,11 @@
 
 #include "../include/record.h"
 
-
+/*
+ * ----------------------------------------------------------------------------
+ * PUBLIC API METHODS
+ * ----------------------------------------------------------------------------
+ */
 int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
 		uint32_t value_length, const void *value)
 {
