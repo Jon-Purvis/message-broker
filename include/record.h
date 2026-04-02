@@ -16,7 +16,7 @@ struct record {
 	void *value;
 };
 
-int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
+int record_init(struct record *record, uint64_t timestamp,
 		uint32_t value_length, const void *value);
 
 void record_destroy(struct record *record);

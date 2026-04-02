@@ -10,14 +10,13 @@
  * PUBLIC API METHODS
  * ----------------------------------------------------------------------------
  */
-int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
+int record_init(struct record *record, uint64_t timestamp,
 		uint32_t value_length, const void *value)
 {
 	if (!record || !value) return -1;
 	if (value_length == 0) return -1;
 
 	record->header.timestamp = timestamp;
-	record->header.offset = offset;
 	record->header.crc = 0;
 	record->header.value_length = value_length;
 
