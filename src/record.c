@@ -7,7 +7,7 @@
 
 
 int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
-		uint32_t value_length, const void *value) 
+		uint32_t value_length, const void *value)
 {
 	if (!record || !value) return -1;
 	if (value_length == 0) return -1;
@@ -25,7 +25,7 @@ int record_init(struct record *record, uint64_t timestamp, uint64_t offset,
 	return 0;
 }
 
-void record_destroy(struct record *record) 
+void record_destroy(struct record *record)
 {
 	if (record == NULL) return;
 	free(record->value);
