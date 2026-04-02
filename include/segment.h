@@ -18,7 +18,7 @@
 
 struct index_entry {
 	uint64_t offset;
-	off_t position;
+	int64_t position;
 };
 
 struct segment {

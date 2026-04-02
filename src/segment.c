@@ -42,7 +42,7 @@ static int write_all(int fd, const void *buf, size_t buf_len)
 	return SEGMENT_OK;
 }
 
-static int segment_write_index(struct segment *segment, off_t physical_position)
+static int segment_write_index(struct segment *segment, int64_t physical_position)
 {
 	struct index_entry entry = {
 		.offset = segment->current_offset,
@@ -64,7 +64,7 @@ static int get_index_entry(struct segment *segment, int64_t index,
 	return SEGMENT_OK;
 }
 
-static int read_from_log(struct segment *segment, struct record *record, off_t position)
+static int read_from_log(struct segment *segment, struct record *record, int64_t position)
 {
 	ssize_t result = pread(segment->log_fd, &record->header, sizeof(record->header), position);
 	if (result != sizeof(record->header)) return SEGMENT_IO_ERR;
@@ -72,8 +72,8 @@ static int read_from_log(struct segment *segment, struct record *record, off_t p
 	record->value = malloc(record->header.value_length);
 	if (!record->value) return SEGMENT_ERR;
 
-	off_t value_position = position + (off_t)sizeof(struct record_header);
-	result = pread(segment->log_fd, record->value, record->header.value_length, value_position);
+	int64_t value_position = position + sizeof(struct record_header);
+	result = pread(segment->log_fd, record->value, record->header.value_length, (off_t)value_position);
 	if (result != (ssize_t)record->header.value_length) {
 		free(record->value);
 		record->value = NULL;
@@ -84,7 +84,7 @@ static int read_from_log(struct segment *segment, struct record *record, off_t p
 }
 
 static int segment_find_position(struct segment *segment, uint64_t target,
-		off_t *out_position)
+		int64_t *out_position)
 {
 	size_t total = segment->current_offset - segment->base_offset;
 	int64_t low = 0;
@@ -183,7 +183,7 @@ int segment_append(struct segment *segment, const struct record *record)
 		return SEGMENT_ERR;
 	}
 
-	off_t physical_position = (off_t)segment->segment_size;
+	int64_t physical_position = (int64_t)segment->segment_size;
 
 	if (write_all(segment->log_fd, buf, len) != SEGMENT_OK) {
 		free(buf);
@@ -205,7 +205,7 @@ int segment_append(struct segment *segment, const struct record *record)
 int segment_read(struct segment *segment, struct record *record,
 		uint64_t target_offset)
 {
-	off_t position;
+	int64_t position;
 	int result;
 
 	if (!segment || !record)
