@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <zlib.h>
 
 #include "../include/record.h"
 
@@ -17,7 +18,7 @@ int record_init(struct record *record, uint64_t timestamp,
 	if (value_length == 0) return -1;
 
 	record->header.timestamp = timestamp;
-	record->header.crc = 0;
+	record->header.crc = (uint32_t)crc32(0L, (const unsigned char *)value, value_length);
 	record->header.value_length = value_length;
 
 	record->value = malloc(value_length);
@@ -71,6 +72,12 @@ ssize_t record_deserialize(struct record *record, const void *buf, size_t buf_le
 
 	memcpy(record->value, p, record->header.value_length);
 	p += record->header.value_length;
+
+	uint32_t expected_crc = (uint32_t)crc32(0L, (const unsigned char *)record->value, record->header.value_length);
+	if (expected_crc != record->header.crc) {
+		free(record->value);
+		return -1;
+	}
 
 	return (ssize_t)(p - (const char *)buf);
 }

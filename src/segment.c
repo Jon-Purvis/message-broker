@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <stddef.h>
+#include <zlib.h>
 
 #include "../include/segment.h"
 #include "../include/record.h"
@@ -75,6 +76,13 @@ static int read_from_log(struct segment *segment, struct record *record, int64_t
 	int64_t value_position = position + sizeof(struct record_header);
 	result = pread(segment->log_fd, record->value, record->header.value_length, (off_t)value_position);
 	if (result != (ssize_t)record->header.value_length) {
+		free(record->value);
+		record->value = NULL;
+		return SEGMENT_IO_ERR;
+	}
+
+	uint32_t actual_crc = (uint32_t)crc32(0L, (const unsigned char *)record->value, record->header.value_length);
+	if (actual_crc != record->header.crc) {
 		free(record->value);
 		record->value = NULL;
 		return SEGMENT_IO_ERR;
