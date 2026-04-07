@@ -5,7 +5,7 @@
 #include <stdint.h>
 #include <inttypes.h>
 
-#include "../include/log.h"
+#include "../include/partition.h"
 #include "../include/segment.h"
 #include "../include/record.h"
 
@@ -14,7 +14,7 @@
  * PRIVATE HELPER METHODS
  * ----------------------------------------------------------------------------
  */
-static int log_file_filter(const struct dirent *entry)
+static int partition_file_filter(const struct dirent *entry)
 {
 	const char *extension = strrchr(entry->d_name, '.');
 	return (extension && strcmp(extension, LOG_EXTENSION) == 0);
@@ -48,7 +48,7 @@ static char *path_join(const char *directory, const char *filename)
 	return result;
 }
 
-static struct segment *log_create_segment(struct log *log, uint64_t base_offset)
+static struct segment *partition_create_segment(struct partition *partition, uint64_t base_offset)
 {
 	struct segment *segment = NULL;
 	char *log_filename = NULL;
@@ -60,8 +60,8 @@ static struct segment *log_create_segment(struct log *log, uint64_t base_offset)
 	index_filename = build_filename(base_offset, INDEX_EXTENSION);
 	if (!log_filename || !index_filename) goto cleanup;
 
-	log_file_path = path_join(log->base_path, log_filename);
-	index_file_path = path_join(log->base_path, index_filename);
+	log_file_path = path_join(partition->base_path, log_filename);
+	index_file_path = path_join(partition->base_path, index_filename);
 	if (!log_file_path || !index_file_path) goto cleanup;
 
 	segment = malloc(sizeof(*segment));
@@ -79,19 +79,19 @@ cleanup:
 	return segment;
 }
 
-static int log_bootstrap(struct log *log)
+static int partition_bootstrap(struct partition *partition)
 {
-	log->segments = calloc(INITIAL_SEGMENT_CAPACITY, sizeof(struct segment *));
-	if (!log->segments) { log_destroy(log); return -1; }
+	partition->segments = calloc(INITIAL_SEGMENT_CAPACITY, sizeof(struct segment *));
+	if (!partition->segments) { partition_destroy(partition); return -1; }
 
-	log->segment_capacity = INITIAL_SEGMENT_CAPACITY;
+	partition->segment_capacity = INITIAL_SEGMENT_CAPACITY;
 
-	struct segment *seg = log_create_segment(log, 0);
-	if (!seg) { log_destroy(log); return -1; }
+	struct segment *seg = partition_create_segment(partition, 0);
+	if (!seg) { partition_destroy(partition); return -1; }
 
-	log->segments[0] = seg;
-	log->active_segment = seg;
-	log->segment_count = 1;
+	partition->segments[0] = seg;
+	partition->active_segment = seg;
+	partition->segment_count = 1;
 	return 0;
 }
 
@@ -110,7 +110,7 @@ static char *change_extension(const char *filename, const char *new_extension)
 	return result;
 }
 
-static struct segment *log_build_segment(const char *base_path, const char *file_name)
+static struct segment *partition_build_segment(const char *base_path, const char *file_name)
 {
 	uint64_t offset = strtoull(file_name, NULL, 10);
 	struct segment *segment = NULL;
@@ -138,48 +138,48 @@ cleanup:
 	return segment;
 }
 
-static int log_load_segments(struct log *log, struct dirent **namelist, int count)
+static int partition_load_segments(struct partition *partition, struct dirent **namelist, int count)
 {
-	log->segment_capacity = (size_t)count + INITIAL_SEGMENT_CAPACITY;
-	log->segments = calloc(log->segment_capacity, sizeof(struct segment *));
-	if (!log->segments) return -1;
+	partition->segment_capacity = (size_t)count + INITIAL_SEGMENT_CAPACITY;
+	partition->segments = calloc(partition->segment_capacity, sizeof(struct segment *));
+	if (!partition->segments) return -1;
 
 	for (int i = 0; i < count; i++) {
-		log->segments[i] = log_build_segment(log->base_path, namelist[i]->d_name);
-		if (!log->segments[i]) return -1;
+		partition->segments[i] = partition_build_segment(partition->base_path, namelist[i]->d_name);
+		if (!partition->segments[i]) return -1;
 
-		log->segment_count++;
+		partition->segment_count++;
 	}
 
-	log->active_segment = log->segments[log->segment_count - 1];
+	partition->active_segment = partition->segments[partition->segment_count - 1];
 	return 0;
 }
 
-static int log_grow_segments(struct log *log)
+static int partition_grow_segments(struct partition *partition)
 {
-	size_t new_capacity = log->segment_capacity * 2;
-	struct segment **grown = realloc(log->segments,
+	size_t new_capacity = partition->segment_capacity * 2;
+	struct segment **grown = realloc(partition->segments,
 			new_capacity * sizeof(struct segment *));
 	if (!grown) return -1;
-	log->segments = grown;
-	log->segment_capacity = new_capacity;
+	partition->segments = grown;
+	partition->segment_capacity = new_capacity;
 	return 0;
 }
 
-static struct segment *log_find_segment(struct log *log, uint64_t offset)
+static struct segment *partition_find_segment(struct partition *partition, uint64_t offset)
 {
-	if (log->segment_count == 0) return NULL;
+	if (partition->segment_count == 0) return NULL;
 
 	int low = 0;
-	int high = (int)log->segment_count - 1;
+	int high = (int)partition->segment_count - 1;
 	while (low < high) {
 		int mid = low + (high - low + 1) / 2;
-		if (log->segments[mid]->base_offset <= offset)
+		if (partition->segments[mid]->base_offset <= offset)
 			low = mid;
 		else
 			high = mid - 1;
 	}
-	return log->segments[low];
+	return partition->segments[low];
 }
 
 /*
@@ -187,26 +187,26 @@ static struct segment *log_find_segment(struct log *log, uint64_t offset)
  * PUBLIC API METHODS
  * ----------------------------------------------------------------------------
  */
-int log_init(struct log *log, const char *base_path)
+int partition_init(struct partition *partition, const char *base_path)
 {
-	if (!log || !base_path) return -1;
-	memset(log, 0, sizeof(*log));
+	if (!partition || !base_path) return -1;
+	memset(partition, 0, sizeof(*partition));
 
-	log->base_path = strdup(base_path);
-	if (!log->base_path) return -1;
+	partition->base_path = strdup(base_path);
+	if (!partition->base_path) return -1;
 
 	struct dirent **namelist = NULL;
-	int num_entries = scandir(base_path, &namelist, log_file_filter, alphasort);
-	if (num_entries < 0) { log_destroy(log); return -1; }
+	int num_entries = scandir(base_path, &namelist, partition_file_filter, alphasort);
+	if (num_entries < 0) { partition_destroy(partition); return -1; }
 
 	if (num_entries == 0) {
 		free_namelist(namelist, num_entries);
-		return log_bootstrap(log);
+		return partition_bootstrap(partition);
 	}
 
-	if (log_load_segments(log, namelist, num_entries) != 0) {
+	if (partition_load_segments(partition, namelist, num_entries) != 0) {
 		free_namelist(namelist, num_entries);
-		log_destroy(log);
+		partition_destroy(partition);
 		return -1;
 	}
 
@@ -214,53 +214,53 @@ int log_init(struct log *log, const char *base_path)
 	return 0;
 }
 
-void log_destroy(struct log *log)
+void partition_destroy(struct partition *partition)
 {
-	if (!log) return;
+	if (!partition) return;
 
-	free(log->base_path);
-	for (int i = 0; i < log->segment_count; i++) {
-		segment_destroy(log->segments[i]);
-		free(log->segments[i]);
+	free(partition->base_path);
+	for (int i = 0; i < partition->segment_count; i++) {
+		segment_destroy(partition->segments[i]);
+		free(partition->segments[i]);
 	}
 
-	free(log->segments);
-	log->base_path = NULL;
-	log->active_segment = NULL;
-	log->segments = NULL;
-	log->segment_count = 0;
-	log->segment_capacity = 0;
+	free(partition->segments);
+	partition->base_path = NULL;
+	partition->active_segment = NULL;
+	partition->segments = NULL;
+	partition->segment_count = 0;
+	partition->segment_capacity = 0;
 }
 
 
-int log_write(struct log *log, struct record *record)
+int partition_write(struct partition *partition, struct record *record)
 {
-	if (!log || !log->base_path || !log->active_segment || !log->segments
+	if (!partition || !partition->base_path || !partition->active_segment || !partition->segments
 			|| !record || !record->value)
 		return -1;
 
-	record->header.offset = log->active_segment->current_offset;
+	record->header.offset = partition->active_segment->current_offset;
 
-	int result = segment_append(log->active_segment, record);
+	int result = segment_append(partition->active_segment, record);
 	if (result == SEGMENT_OK) return 0;
 	if (result != SEGMENT_FULL) return -1;
 
-	if (log->segment_count == log->segment_capacity) {
-		if (log_grow_segments(log) != 0) return -1;
+	if (partition->segment_count == partition->segment_capacity) {
+		if (partition_grow_segments(partition) != 0) return -1;
 	}
 
-	uint64_t new_base_offset = log->active_segment->current_offset;
-	struct segment *segment = log_create_segment(log, new_base_offset);
+	uint64_t new_base_offset = partition->active_segment->current_offset;
+	struct segment *segment = partition_create_segment(partition, new_base_offset);
 	if (!segment) return -1;
 
-	log->segments[log->segment_count] = segment;
-	log->active_segment = segment;
-	log->segment_count++;
+	partition->segments[partition->segment_count] = segment;
+	partition->active_segment = segment;
+	partition->segment_count++;
 
-	if (segment_append(log->active_segment, record) != SEGMENT_OK) {
-		log->segment_count--;
-		log->active_segment = log->segments[log->segment_count - 1];
-		log->segments[log->segment_count] = NULL;
+	if (segment_append(partition->active_segment, record) != SEGMENT_OK) {
+		partition->segment_count--;
+		partition->active_segment = partition->segments[partition->segment_count - 1];
+		partition->segments[partition->segment_count] = NULL;
 		unlink(segment->log_file_path);
 		unlink(segment->index_file_path);
 		segment_destroy(segment);
@@ -271,12 +271,12 @@ int log_write(struct log *log, struct record *record)
 	return 0;
 }
 
-int log_read(struct log *log, struct record *record, uint64_t offset)
+int partition_read(struct partition *partition, struct record *record, uint64_t offset)
 {
-	if (!log || !log->base_path || !log->active_segment || !log->segments || !record)
+	if (!partition || !partition->base_path || !partition->active_segment || !partition->segments || !record)
 		return -1;
 
-	struct segment *target_segment = log_find_segment(log, offset);
+	struct segment *target_segment = partition_find_segment(partition, offset);
 	if (!target_segment) return -1;
 
 	if (segment_read(target_segment, record, offset) != SEGMENT_OK)
@@ -284,3 +284,4 @@ int log_read(struct log *log, struct record *record, uint64_t offset)
 
 	return 0;
 }
+
