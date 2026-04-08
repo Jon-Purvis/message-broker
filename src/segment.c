@@ -8,13 +8,13 @@
 
 #include "../include/segment.h"
 #include "../include/record.h"
+#include "../include/util.h"
 
 /*
  * ----------------------------------------------------------------------------
  * PRIVATE HELPER METHODS
  * ----------------------------------------------------------------------------
  */
-
 static int segment_recover(struct segment *segment)
 {
 	off_t log_size = lseek(segment->log_fd, 0, SEEK_END);
@@ -43,38 +43,48 @@ static int write_all(int fd, const void *buf, size_t buf_len)
 	return SEGMENT_OK;
 }
 
-static int segment_write_index(struct segment *segment, int64_t physical_position)
-{
-	struct index_entry entry = {
-		.offset = segment->current_offset,
-		.position = physical_position
-	};
+static int segment_write_index(struct segment *segment, int64_t physical_position) {
+	uint8_t buffer[sizeof(struct index_entry)];
+	uint8_t *p = buffer;
 
-	return write_all(segment->index_fd, &entry, sizeof(entry));
+	pack_u64(&p, segment->current_offset);
+	pack_u64(&p, (uint64_t)physical_position);
+
+	return write_all(segment->index_fd, buffer, sizeof(struct index_entry));
 }
 
-static int get_index_entry(struct segment *segment, int64_t index,
-		struct index_entry *entry)
-{
-	ssize_t result;
+static int get_index_entry(struct segment *segment, int64_t index, struct index_entry *entry) {
+	uint8_t buffer[sizeof(struct index_entry)];
 	size_t entry_size = sizeof(struct index_entry);
 
-	result = pread(segment->index_fd, entry, entry_size, (off_t)(index * entry_size));
+	ssize_t result = pread(segment->index_fd, buffer, entry_size, (off_t)(index * entry_size));
 	if (result != (ssize_t)entry_size) return SEGMENT_IO_ERR;
+
+	const uint8_t *p = buffer;
+	entry->offset = unpack_u64(&p);
+	entry->position = (int64_t)unpack_u64(&p);
 
 	return SEGMENT_OK;
 }
 
 static int read_from_log(struct segment *segment, struct record *record, int64_t position)
 {
-	ssize_t result = pread(segment->log_fd, &record->header, sizeof(record->header), position);
-	if (result != sizeof(record->header)) return SEGMENT_IO_ERR;
+	uint8_t header_buf[sizeof(struct record_header)];
+	ssize_t result = pread(segment->log_fd, header_buf, sizeof(header_buf), position);
+	if (result != sizeof(header_buf)) return SEGMENT_IO_ERR;
+
+	const uint8_t *p = header_buf;
+	record->header.timestamp = unpack_u64(&p);
+	record->header.offset = unpack_u64(&p);
+	record->header.crc = unpack_u32(&p);
+	record->header.value_length = unpack_u32(&p);
 
 	record->value = malloc(record->header.value_length);
 	if (!record->value) return SEGMENT_ERR;
 
-	int64_t value_position = position + sizeof(struct record_header);
+	int64_t value_position = position + sizeof(header_buf);
 	result = pread(segment->log_fd, record->value, record->header.value_length, (off_t)value_position);
+
 	if (result != (ssize_t)record->header.value_length) {
 		free(record->value);
 		record->value = NULL;

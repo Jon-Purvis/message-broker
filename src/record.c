@@ -5,6 +5,7 @@
 #include <zlib.h>
 
 #include "../include/record.h"
+#include "../include/util.h"
 
 /*
  * ----------------------------------------------------------------------------
@@ -36,49 +37,48 @@ void record_destroy(struct record *record)
 	record->value = NULL;
 }
 
-ssize_t record_serialize(const struct record *record, void *buf, size_t buf_len)
-{
-	size_t total_len;
-	char *p = (char *)buf;
-
+ssize_t record_serialize(const struct record *record, void *buf, size_t buf_len) {
 	if (!record || !record->value || !buf) return -1;
 
-	total_len = sizeof(struct record_header) + record->header.value_length;
+	size_t total_len = sizeof(struct record_header) + record->header.value_length;
 	if (buf_len < total_len) return -1;
 
-	memcpy(p, &record->header, sizeof(struct record_header));
-	p += sizeof(struct record_header);
+	uint8_t *p = (uint8_t *)buf;
+
+	pack_u64(&p, record->header.timestamp);
+	pack_u64(&p, record->header.offset);
+	pack_u32(&p, record->header.crc);
+	pack_u32(&p, record->header.value_length);
 
 	memcpy(p, record->value, record->header.value_length);
 	p += record->header.value_length;
 
-	return (ssize_t)(p - (char *)buf);
+	return (ssize_t)(p - (uint8_t *)buf);
 }
 
-ssize_t record_deserialize(struct record *record, const void *buf, size_t buf_len)
-{
-	if (!record || !buf || buf_len < sizeof(struct record_header))
-		return -1;
+ssize_t record_deserialize(struct record *record, const void *buf, size_t buf_len) {
+	if (!record || !buf || buf_len < sizeof(struct record_header)) return -1;
 
-	const char *p = (char *)buf;
-	memcpy(&record->header, p, sizeof(struct record_header));
-	p += sizeof(struct record_header);
+	const uint8_t *p = (const uint8_t *)buf;
 
-	if (buf_len < sizeof(struct record_header) +
-			record->header.value_length) return -1;
+	record->header.timestamp = unpack_u64(&p);
+	record->header.offset = unpack_u64(&p);
+	record->header.crc = unpack_u32(&p);
+	record->header.value_length = unpack_u32(&p);
+
+	if (buf_len < sizeof(struct record_header) + record->header.value_length) return -1;
 
 	record->value = malloc(record->header.value_length);
 	if (!record->value) return -1;
 
 	memcpy(record->value, p, record->header.value_length);
-	p += record->header.value_length;
 
-	uint32_t expected_crc = (uint32_t)crc32(0L, (const unsigned char *)record->value, record->header.value_length);
+	uint32_t expected_crc = (uint32_t)crc32(0L, record->value, record->header.value_length);
 	if (expected_crc != record->header.crc) {
 		free(record->value);
 		return -1;
 	}
 
-	return (ssize_t)(p - (const char *)buf);
+	return (ssize_t)(sizeof(struct record_header) + record->header.value_length);
 }
 
