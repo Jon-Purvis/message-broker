@@ -8,6 +8,7 @@
 #include "../include/partition.h"
 #include "../include/segment.h"
 #include "../include/record.h"
+#include "../include/util.h"
 
 /*
  * ----------------------------------------------------------------------------
@@ -37,16 +38,6 @@ static char *build_filename(uint64_t offset, const char *extension)
 	return result;
 }
 
-static char *path_join(const char *directory, const char *filename)
-{
-	int length = snprintf(NULL, 0, "%s/%s", directory, filename);
-	if (length < 0) return NULL;
-
-	char *result = malloc(length + 1);
-	if (result) snprintf(result, length + 1, "%s/%s", directory, filename);
-
-	return result;
-}
 
 static struct segment *partition_create_segment(struct partition *partition, uint64_t base_offset)
 {

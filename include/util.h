@@ -1,6 +1,8 @@
 #ifndef UTIL_H
 #define UTIL_H
 
+#include <stdlib.h>
+#include <stdio.h>
 #include <stdint.h>
 #include <string.h>
 #include <arpa/inet.h>
@@ -41,30 +43,46 @@ static inline uint64_t broker_ntohll(uint64_t val)
  * SERIALIZATION HELPERS
  * ----------------------------------------------------------------------------
  */
-static inline void pack_u32(uint8_t **p, uint32_t val) {
+static inline void pack_u32(uint8_t **p, uint32_t val)
+{
 	uint32_t net = htonl(val);
 	memcpy(*p, &net, 4);
 	*p += 4;
 }
 
-static inline void pack_u64(uint8_t **p, uint64_t val) {
+static inline void pack_u64(uint8_t **p, uint64_t val)
+{
 	uint64_t net = broker_htonll(val);
 	memcpy(*p, &net, 8);
 	*p += 8;
 }
 
-static inline uint32_t unpack_u32(const uint8_t **p) {
+static inline uint32_t unpack_u32(const uint8_t **p)
+{
 	uint32_t net;
 	memcpy(&net, *p, 4);
 	*p += 4;
 	return ntohl(net);
 }
 
-static inline uint64_t unpack_u64(const uint8_t **p) {
+static inline uint64_t unpack_u64(const uint8_t **p)
+{
 	uint64_t net;
 	memcpy(&net, *p, 8);
 	*p += 8;
 	return broker_ntohll(net);
+}
+
+
+static inline char *path_join(const char *base, const char *sub)
+{
+	int length = snprintf(NULL, 0, "%s/%s", base, sub);
+	if (length < 0) return NULL;
+
+	char *result = (char *)malloc(length + 1);
+	if (result) snprintf(result, length + 1, "%s/%s", base, sub);
+
+	return result;
 }
 
 #endif
