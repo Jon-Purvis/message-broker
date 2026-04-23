@@ -10,11 +10,6 @@
 #include "../include/record.h"
 #include "../include/util.h"
 
-/*
- * ----------------------------------------------------------------------------
- * PRIVATE HELPER METHODS
- * ----------------------------------------------------------------------------
- */
 static int partition_file_filter(const struct dirent *entry)
 {
 	const char *extension = strrchr(entry->d_name, '.');
@@ -23,9 +18,10 @@ static int partition_file_filter(const struct dirent *entry)
 
 static void free_namelist(struct dirent **list, int num_entries)
 {
-	for (int i = 0; i < num_entries; i++) {
-		free(list[i]);
-	}
+	int entry_index;
+
+	for (entry_index = 0; entry_index < num_entries; entry_index++)
+		free(list[entry_index]);
 	free(list);
 }
 
@@ -117,7 +113,7 @@ static struct segment *partition_build_segment(const char *base_path, const char
 	if (!index_path) goto cleanup;
 
 	segment = malloc(sizeof(*segment));
-	if (segment && segment_init(segment, offset, log_path, index_path) != 0) {
+	if (segment && segment_init(segment, offset, log_path, index_path) != SEGMENT_OK) {
 		free(segment);
 		segment = NULL;
 	}
@@ -173,11 +169,6 @@ static struct segment *partition_find_segment(struct partition *partition, uint6
 	return partition->segments[low];
 }
 
-/*
- * ----------------------------------------------------------------------------
- * PUBLIC API METHODS
- * ----------------------------------------------------------------------------
- */
 int partition_init(struct partition *partition, const char *base_path)
 {
 	if (!partition || !base_path) return -1;
@@ -210,7 +201,7 @@ void partition_destroy(struct partition *partition)
 	if (!partition) return;
 
 	free(partition->base_path);
-	for (int i = 0; i < partition->segment_count; i++) {
+	for (size_t i = 0; i < partition->segment_count; i++) {
 		segment_destroy(partition->segments[i]);
 		free(partition->segments[i]);
 	}
@@ -270,9 +261,6 @@ int partition_read(struct partition *partition, struct record *record, uint64_t 
 	struct segment *target_segment = partition_find_segment(partition, offset);
 	if (!target_segment) return -1;
 
-	if (segment_read(target_segment, record, offset) != SEGMENT_OK)
-		return -1;
-
-	return 0;
+	return segment_read(target_segment, record, offset);
 }
 

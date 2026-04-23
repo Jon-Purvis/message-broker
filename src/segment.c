@@ -10,11 +10,6 @@
 #include "../include/record.h"
 #include "../include/util.h"
 
-/*
- * ----------------------------------------------------------------------------
- * PRIVATE HELPER METHODS
- * ----------------------------------------------------------------------------
- */
 static int segment_recover(struct segment *segment)
 {
 	off_t log_size = lseek(segment->log_fd, 0, SEEK_END);
@@ -128,11 +123,6 @@ static int segment_find_position(struct segment *segment, uint64_t target,
 	return SEGMENT_NOT_FOUND;
 }
 
-/*
- * ----------------------------------------------------------------------------
- * PUBLIC API METHODS
- * ----------------------------------------------------------------------------
- */
 int segment_init(struct segment *segment, uint64_t base_offset,
 		const char *log_path, const char *index_path)
 {
