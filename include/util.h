@@ -43,6 +43,13 @@ static inline uint64_t broker_ntohll(uint64_t val)
  * SERIALIZATION HELPERS
  * ----------------------------------------------------------------------------
  */
+static inline void pack_u16(uint8_t **p, uint16_t val)
+{
+    uint16_t net = htons(val);
+    memcpy(*p, &net, 2);
+    *p += 2;
+}
+
 static inline void pack_u32(uint8_t **p, uint32_t val)
 {
 	uint32_t net = htonl(val);
@@ -56,6 +63,15 @@ static inline void pack_u64(uint8_t **p, uint64_t val)
 	memcpy(*p, &net, 8);
 	*p += 8;
 }
+
+static inline uint16_t unpack_u16(const uint8_t **p)
+{
+    uint16_t net;
+    memcpy(&net, *p, 2);
+    *p += 2;
+    return ntohs(net);
+}
+
 
 static inline uint32_t unpack_u32(const uint8_t **p)
 {
