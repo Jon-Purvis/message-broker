@@ -9,15 +9,17 @@
 #include "../include/partition.h"
 #include "../include/util.h"
 
-static uint32_t topic_partition_index_for_key(const void *key, size_t key_byte_count,
-		uint32_t partition_count)
+static uint32_t topic_partition_index_for_key(const void *key,
+											  size_t key_byte_count,
+											  uint32_t partition_count)
 {
 	uint32_t hash;
 
 	if (!key || key_byte_count == 0)
 		return 0;
 
-	hash = (uint32_t)crc32(0L, (const unsigned char *)key, (uInt)key_byte_count);
+	hash =
+		(uint32_t)crc32(0L, (const unsigned char *)key, (uInt)key_byte_count);
 	return hash % partition_count;
 }
 
@@ -45,8 +47,9 @@ static char *partition_directory_path(const char *topic_path, uint32_t index)
 	return full_path;
 }
 
-static int topic_attach_partition(struct topic *topic, uint32_t index,
-		const char *topic_path)
+static int topic_attach_partition(struct topic *topic,
+								  uint32_t index,
+								  const char *topic_path)
 {
 	char *partition_path;
 	struct partition *partition;
@@ -77,8 +80,10 @@ static int topic_attach_partition(struct topic *topic, uint32_t index,
 	return 0;
 }
 
-int topic_init(struct topic *topic, const char *name,
-		const char *base_path, uint32_t partition_count)
+int topic_init(struct topic *topic,
+			   const char *name,
+			   const char *base_path,
+			   uint32_t partition_count)
 {
 	char *topic_path;
 	uint32_t partition_index;
@@ -103,7 +108,8 @@ int topic_init(struct topic *topic, const char *name,
 		goto fail;
 	}
 
-	for (partition_index = 0; partition_index < partition_count; partition_index++) {
+	for (partition_index = 0; partition_index < partition_count;
+		 partition_index++) {
 		if (topic_attach_partition(topic, partition_index, topic_path) != 0) {
 			free(topic_path);
 			goto fail;
@@ -127,7 +133,7 @@ void topic_destroy(struct topic *topic)
 
 	if (topic->partitions) {
 		for (partition_index = 0; partition_index < topic->partition_count;
-				partition_index++) {
+			 partition_index++) {
 			if (!topic->partitions[partition_index])
 				continue;
 			partition_destroy(topic->partitions[partition_index]);
@@ -142,9 +148,11 @@ void topic_destroy(struct topic *topic)
 	topic->partition_count = 0;
 }
 
-int topic_write(struct topic *topic, const void *key,
-		size_t key_len, struct record *record,
-		uint32_t *assigned_partition_out)
+int topic_write(struct topic *topic,
+				const void *key,
+				size_t key_len,
+				struct record *record,
+				uint32_t *assigned_partition_out)
 {
 	uint32_t partition_index;
 	int write_result;
@@ -152,8 +160,8 @@ int topic_write(struct topic *topic, const void *key,
 	if (!topic || !record || !topic->partitions)
 		return -1;
 
-	partition_index = topic_partition_index_for_key(key, key_len,
-			topic->partition_count);
+	partition_index =
+		topic_partition_index_for_key(key, key_len, topic->partition_count);
 	write_result = partition_write(topic->partitions[partition_index], record);
 
 	if (write_result == 0 && assigned_partition_out)
@@ -161,8 +169,10 @@ int topic_write(struct topic *topic, const void *key,
 	return write_result;
 }
 
-int topic_read(struct topic *topic, struct record *record,
-		uint32_t partition, uint64_t offset)
+int topic_read(struct topic *topic,
+			   struct record *record,
+			   uint32_t partition,
+			   uint64_t offset)
 {
 	if (!topic || !topic->partitions || partition >= topic->partition_count)
 		return -1;

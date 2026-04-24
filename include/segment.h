@@ -10,11 +10,11 @@
 /* currently hardcoded 64 MB. Pulled from config file later. */
 #define SEGMENT_MAX_BYTES (1024 * 1024 * 64)
 
-#define SEGMENT_OK          0
-#define SEGMENT_ERR        -1
-#define SEGMENT_FULL       -2
-#define SEGMENT_NOT_FOUND  -3
-#define SEGMENT_IO_ERR     -4
+#define SEGMENT_OK 0
+#define SEGMENT_ERR -1
+#define SEGMENT_FULL -2
+#define SEGMENT_NOT_FOUND -3
+#define SEGMENT_IO_ERR -4
 
 struct index_entry {
 	uint64_t offset;
@@ -33,14 +33,17 @@ struct segment {
 	int log_fd;
 };
 
-int segment_init(struct segment *segment, uint64_t base_offset,
-		const char *log_file_path, const char *index_file_path);
+int segment_init(struct segment *segment,
+				 uint64_t base_offset,
+				 const char *log_file_path,
+				 const char *index_file_path);
 
 void segment_destroy(struct segment *segment);
 
 int segment_append(struct segment *segment, const struct record *record);
 
-int segment_read(struct segment *segment, struct record *record, uint64_t offset);
+int segment_read(struct segment *segment,
+				 struct record *record,
+				 uint64_t offset);
 
 #endif
-

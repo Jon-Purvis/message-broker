@@ -13,26 +13,30 @@
 
 /*
  * Wire: 48-byte big-endian header (see message_header), then topic, key, value.
- * CRC: zlib CRC32 over header[4..48) plus topic, key, value (crc field excluded).
+ * CRC: zlib CRC32 over header[4..48) plus topic, key, value (crc field
+ * excluded).
  */
 #define HEADER_WIRE_SIZE 48
 
 static uint32_t request_payload_crc32(const uint8_t *header_wire,
-		const struct message *msg)
+									  const struct message *msg)
 {
 	uLong crc = crc32(0L, Z_NULL, 0);
 	crc = crc32(crc, header_wire + 4, (uInt)(HEADER_WIRE_SIZE - 4));
 	if (msg->header.topic_length > 0 && msg->topic)
-		crc = crc32(crc, (const Bytef *)msg->topic, (uInt)msg->header.topic_length);
+		crc = crc32(
+			crc, (const Bytef *)msg->topic, (uInt)msg->header.topic_length);
 	if (msg->header.key_length > 0 && msg->key)
 		crc = crc32(crc, (const Bytef *)msg->key, (uInt)msg->header.key_length);
 	if (msg->header.value_length > 0 && msg->value)
-		crc = crc32(crc, (const Bytef *)msg->value, (uInt)msg->header.value_length);
+		crc = crc32(
+			crc, (const Bytef *)msg->value, (uInt)msg->header.value_length);
 	return (uint32_t)crc;
 }
 
-static void pack_wire_header(uint8_t hdr[HEADER_WIRE_SIZE], const struct message *msg,
-		uint32_t crc_field)
+static void pack_wire_header(uint8_t hdr[HEADER_WIRE_SIZE],
+							 const struct message *msg,
+							 uint32_t crc_field)
 {
 	uint8_t *p = hdr;
 
@@ -49,7 +53,8 @@ static void pack_wire_header(uint8_t hdr[HEADER_WIRE_SIZE], const struct message
 	pack_u32(&p, msg->header.create_partition_count);
 }
 
-static void unpack_wire_header(const uint8_t hdr[HEADER_WIRE_SIZE], struct message *msg)
+static void unpack_wire_header(const uint8_t hdr[HEADER_WIRE_SIZE],
+							   struct message *msg)
 {
 	const uint8_t *p = hdr;
 
@@ -120,12 +125,18 @@ void message_refresh_crc(struct message *msg)
 	msg->header.crc = request_payload_crc32(hdr, msg);
 }
 
-int message_init(struct message *msg, command_type_t cmd, uint16_t flags,
-		const void *topic, uint32_t topic_length,
-		const void *key, uint32_t key_length,
-		const void *value, uint32_t value_length,
-		uint32_t partition_index, uint64_t consume_offset,
-		uint32_t create_partition_count)
+int message_init(struct message *msg,
+				 command_type_t cmd,
+				 uint16_t flags,
+				 const void *topic,
+				 uint32_t topic_length,
+				 const void *key,
+				 uint32_t key_length,
+				 const void *value,
+				 uint32_t value_length,
+				 uint32_t partition_index,
+				 uint64_t consume_offset,
+				 uint32_t create_partition_count)
 {
 	if (!msg)
 		return -1;
@@ -139,7 +150,8 @@ int message_init(struct message *msg, command_type_t cmd, uint16_t flags,
 	msg->header.partition_index = partition_index;
 	msg->header.consume_offset = consume_offset;
 	msg->header.create_partition_count = create_partition_count;
-	msg->header.total_size = HEADER_WIRE_SIZE + topic_length + key_length + value_length;
+	msg->header.total_size =
+		HEADER_WIRE_SIZE + topic_length + key_length + value_length;
 	msg->header.timestamp = (uint64_t)time(NULL);
 
 	if (topic && topic_length > 0) {
@@ -199,7 +211,8 @@ int network_listen(uint16_t port)
 		return -1;
 	}
 
-	int sockfd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+	int sockfd =
+		socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 	if (sockfd == -1) {
 		perror("socket");
 		freeaddrinfo(result);
@@ -234,7 +247,8 @@ int network_accept(int server_fd)
 {
 	struct sockaddr_storage peer_addr;
 	socklen_t addr_size = sizeof peer_addr;
-	int client_fd = accept(server_fd, (struct sockaddr *)&peer_addr, &addr_size);
+	int client_fd =
+		accept(server_fd, (struct sockaddr *)&peer_addr, &addr_size);
 
 	if (client_fd == -1)
 		perror("accept");
@@ -254,16 +268,18 @@ int network_recv_packet(int client_fd, struct message *msg)
 
 	unpack_wire_header(header_buf, msg);
 
-	uint32_t expected_body = HEADER_WIRE_SIZE + msg->header.topic_length
-		+ msg->header.key_length + msg->header.value_length;
+	uint32_t expected_body = HEADER_WIRE_SIZE + msg->header.topic_length +
+		msg->header.key_length + msg->header.value_length;
 	if (msg->header.total_size != expected_body)
 		return -1;
 
-	if (recv_payload_blob(client_fd, &msg->topic, msg->header.topic_length) != 0)
+	if (recv_payload_blob(client_fd, &msg->topic, msg->header.topic_length) !=
+		0)
 		goto fail;
 	if (recv_payload_blob(client_fd, &msg->key, msg->header.key_length) != 0)
 		goto fail;
-	if (recv_payload_blob(client_fd, &msg->value, msg->header.value_length) != 0)
+	if (recv_payload_blob(client_fd, &msg->value, msg->header.value_length) !=
+		0)
 		goto fail;
 
 	if (request_payload_crc32(header_buf, msg) != msg->header.crc) {
@@ -285,8 +301,8 @@ int network_send_packet(int client_fd, const struct message *msg)
 	if (!msg)
 		return -1;
 
-	expected_size = HEADER_WIRE_SIZE + msg->header.topic_length
-		+ msg->header.key_length + msg->header.value_length;
+	expected_size = HEADER_WIRE_SIZE + msg->header.topic_length +
+		msg->header.key_length + msg->header.value_length;
 	if (msg->header.total_size != expected_size)
 		return -1;
 
@@ -352,8 +368,10 @@ int network_recv_response(int client_fd, struct network_response *resp)
 	return 0;
 }
 
-int network_send_response(int client_fd, int status_code,
-		const void *payload, size_t len)
+int network_send_response(int client_fd,
+						  int status_code,
+						  const void *payload,
+						  size_t len)
 {
 	uint8_t prefix[8];
 	uint8_t *p = prefix;

@@ -23,7 +23,8 @@ struct message_header {
 	uint32_t value_length;
 	uint32_t partition_index;
 	uint64_t consume_offset;
-	/* CMD_CREATE_TOPIC: number of partitions; must be 0 for PRODUCE / CONSUME */
+	/* CMD_CREATE_TOPIC: number of partitions; must be 0 for PRODUCE / CONSUME
+	 */
 	uint32_t create_partition_count;
 };
 
@@ -40,12 +41,18 @@ struct network_response {
 	uint32_t body_length;
 };
 
-int message_init(struct message *msg, command_type_t cmd, uint16_t flags,
-        const void *topic, uint32_t topic_length,
-        const void *key, uint32_t key_length,
-        const void *value, uint32_t value_length,
-        uint32_t partition_index, uint64_t consume_offset,
-        uint32_t create_partition_count);
+int message_init(struct message *msg,
+				 command_type_t cmd,
+				 uint16_t flags,
+				 const void *topic,
+				 uint32_t topic_length,
+				 const void *key,
+				 uint32_t key_length,
+				 const void *value,
+				 uint32_t value_length,
+				 uint32_t partition_index,
+				 uint64_t consume_offset,
+				 uint32_t create_partition_count);
 
 void message_destroy(struct message *message);
 
@@ -64,8 +71,9 @@ void network_response_deinit(struct network_response *resp);
 
 int network_recv_response(int client_fd, struct network_response *resp);
 
-int network_send_response(int client_fd, int status_code,
-		const void *payload, size_t len);
+int network_send_response(int client_fd,
+						  int status_code,
+						  const void *payload,
+						  size_t len);
 
 #endif
-

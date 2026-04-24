@@ -23,7 +23,8 @@ void partition_destroy(struct partition *partition);
 
 int partition_write(struct partition *partition, struct record *record);
 
-int partition_read(struct partition *partition, struct record *record, uint64_t offset);
+int partition_read(struct partition *partition,
+				   struct record *record,
+				   uint64_t offset);
 
 #endif
-
