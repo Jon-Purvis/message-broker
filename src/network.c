@@ -18,13 +18,12 @@
  * CRC: zlib CRC32 over header[4..48) plus topic, key, value (crc field
  * excluded).
  */
-#define HEADER_WIRE_SIZE 48
-
 static uint32_t request_payload_crc32(const uint8_t *header_wire,
 									  const struct message *msg)
 {
 	uLong crc = crc32(0L, Z_NULL, 0);
-	crc = crc32(crc, header_wire + 4, (uInt)(HEADER_WIRE_SIZE - 4));
+	crc = crc32(
+		crc, header_wire + 4, (uInt)(NETWORK_HEADER_WIRE_SIZE - 4));
 	if (msg->header.topic_length > 0 && msg->topic)
 		crc = crc32(
 			crc, (const Bytef *)msg->topic, (uInt)msg->header.topic_length);
@@ -36,7 +35,7 @@ static uint32_t request_payload_crc32(const uint8_t *header_wire,
 	return (uint32_t)crc;
 }
 
-static void pack_wire_header(uint8_t hdr[HEADER_WIRE_SIZE],
+static void pack_wire_header(uint8_t hdr[NETWORK_HEADER_WIRE_SIZE],
 							 const struct message *msg,
 							 uint32_t crc_field)
 {
@@ -55,8 +54,9 @@ static void pack_wire_header(uint8_t hdr[HEADER_WIRE_SIZE],
 	pack_u32(&p, msg->header.create_partition_count);
 }
 
-static void unpack_wire_header(const uint8_t hdr[HEADER_WIRE_SIZE],
-							   struct message *msg)
+static void unpack_wire_header(
+	const uint8_t hdr[NETWORK_HEADER_WIRE_SIZE],
+	struct message *msg)
 {
 	const uint8_t *p = hdr;
 
@@ -119,7 +119,7 @@ static int recv_payload_blob(int fd, void **out_data, uint32_t byte_count)
 
 void message_refresh_crc(struct message *msg)
 {
-	uint8_t hdr[HEADER_WIRE_SIZE];
+	uint8_t hdr[NETWORK_HEADER_WIRE_SIZE];
 
 	if (!msg)
 		return;
@@ -153,7 +153,7 @@ int message_init(struct message *msg,
 	msg->header.consume_offset = consume_offset;
 	msg->header.create_partition_count = create_partition_count;
 	msg->header.total_size =
-		HEADER_WIRE_SIZE + topic_length + key_length + value_length;
+		NETWORK_HEADER_WIRE_SIZE + topic_length + key_length + value_length;
 	msg->header.timestamp = (uint64_t)time(NULL);
 
 	if (topic && topic_length > 0) {
@@ -252,25 +252,27 @@ int network_accept(int server_fd)
 	int client_fd =
 		accept(server_fd, (struct sockaddr *)&peer_addr, &addr_size);
 
-	if (client_fd == -1)
+	if (client_fd == -1 && errno != EAGAIN && errno != EWOULDBLOCK &&
+		errno != EINTR)
 		perror("accept");
 	return client_fd;
 }
 
 int network_recv_packet(int client_fd, struct message *msg)
 {
-	uint8_t header_buf[HEADER_WIRE_SIZE];
+	uint8_t header_buf[NETWORK_HEADER_WIRE_SIZE];
 
 	if (!msg)
 		return -1;
 	memset(msg, 0, sizeof(*msg));
 
-	if (recv_all(client_fd, header_buf, HEADER_WIRE_SIZE) != 0)
+	if (recv_all(client_fd, header_buf, NETWORK_HEADER_WIRE_SIZE) != 0)
 		return -1;
 
 	unpack_wire_header(header_buf, msg);
 
-	uint32_t expected_body = HEADER_WIRE_SIZE + msg->header.topic_length +
+	uint32_t expected_body = NETWORK_HEADER_WIRE_SIZE +
+		msg->header.topic_length +
 		msg->header.key_length + msg->header.value_length;
 	if (msg->header.total_size != expected_body)
 		return -1;
@@ -297,13 +299,13 @@ fail:
 
 int network_send_packet(int client_fd, const struct message *msg)
 {
-	uint8_t hdr[HEADER_WIRE_SIZE];
+	uint8_t hdr[NETWORK_HEADER_WIRE_SIZE];
 	uint32_t expected_size;
 
 	if (!msg)
 		return -1;
 
-	expected_size = HEADER_WIRE_SIZE + msg->header.topic_length +
+	expected_size = NETWORK_HEADER_WIRE_SIZE + msg->header.topic_length +
 		msg->header.key_length + msg->header.value_length;
 	if (msg->header.total_size != expected_size)
 		return -1;
@@ -340,11 +342,11 @@ int network_set_nonblocking(int fd)
 	return 0;
 }
 
-enum network_io_result network_recv_into_buffer_step(
-	int fd,
-	uint8_t *buffer,
-	size_t buffer_length,
-	size_t *bytes_received_in_out)
+enum network_io_result
+network_recv_into_buffer_step(int fd,
+							  uint8_t *buffer,
+							  size_t buffer_length,
+							  size_t *bytes_received_in_out)
 {
 	if (!buffer || !bytes_received_in_out)
 		return NETWORK_IO_ERROR;
@@ -373,9 +375,9 @@ enum network_io_result network_recv_into_buffer_step(
 }
 
 enum network_io_result network_send_from_buffer_step(int fd,
-													  const uint8_t *buffer,
-													  size_t buffer_length,
-													  size_t *bytes_sent_in_out)
+													 const uint8_t *buffer,
+													 size_t buffer_length,
+													 size_t *bytes_sent_in_out)
 {
 	if (!buffer || !bytes_sent_in_out)
 		return NETWORK_IO_ERROR;
@@ -384,10 +386,8 @@ enum network_io_result network_send_from_buffer_step(int fd,
 	if (*bytes_sent_in_out == buffer_length)
 		return NETWORK_IO_COMPLETE;
 
-	ssize_t bytes_written = send(fd,
-								 buffer + *bytes_sent_in_out,
-								 buffer_length - *bytes_sent_in_out,
-								 0);
+	ssize_t bytes_written = send(
+		fd, buffer + *bytes_sent_in_out, buffer_length - *bytes_sent_in_out, 0);
 	if (bytes_written > 0) {
 		*bytes_sent_in_out += (size_t)bytes_written;
 		if (*bytes_sent_in_out == buffer_length)
@@ -401,6 +401,129 @@ enum network_io_result network_send_from_buffer_step(int fd,
 	if (errno == EINTR)
 		return NETWORK_IO_PROGRESS;
 	return NETWORK_IO_ERROR;
+}
+
+static int network_allocate_and_copy_body_slice(
+	const uint8_t *request_body_buffer,
+	size_t request_body_length,
+	size_t *request_body_offset_in_out,
+	uint32_t field_length,
+	void **field_out)
+{
+	if (!request_body_offset_in_out || !field_out)
+		return -1;
+	*field_out = NULL;
+	if (field_length == 0)
+		return 0;
+	if (!request_body_buffer)
+		return -1;
+	if (*request_body_offset_in_out > request_body_length)
+		return -1;
+	if ((size_t)field_length >
+		request_body_length - *request_body_offset_in_out) {
+		return -1;
+	}
+
+	void *allocated_field = malloc(field_length);
+	if (!allocated_field)
+		return -1;
+	memcpy(
+		allocated_field, request_body_buffer + *request_body_offset_in_out, field_length);
+	*request_body_offset_in_out += field_length;
+	*field_out = allocated_field;
+	return 0;
+}
+
+int network_decode_packet_buffers(
+	const uint8_t header_buffer[NETWORK_HEADER_WIRE_SIZE],
+	const uint8_t *body_buffer,
+	size_t body_buffer_length,
+	struct message *msg_out)
+{
+	uint64_t total_size_wire;
+	uint64_t expected_total_size;
+	size_t body_offset = 0;
+
+	if (!header_buffer || !msg_out)
+		return -1;
+
+	memset(msg_out, 0, sizeof(*msg_out));
+	unpack_wire_header(header_buffer, msg_out);
+
+	total_size_wire = (uint64_t)msg_out->header.total_size;
+	expected_total_size = (uint64_t)NETWORK_HEADER_WIRE_SIZE +
+		(uint64_t)msg_out->header.topic_length +
+		(uint64_t)msg_out->header.key_length +
+		(uint64_t)msg_out->header.value_length;
+	if (expected_total_size != total_size_wire)
+		return -1;
+	if (body_buffer_length !=
+		(size_t)(expected_total_size - NETWORK_HEADER_WIRE_SIZE))
+		return -1;
+	if (body_buffer_length > 0 && !body_buffer)
+		return -1;
+
+	if (network_allocate_and_copy_body_slice(body_buffer,
+											 body_buffer_length,
+											 &body_offset,
+											 msg_out->header.topic_length,
+											 &msg_out->topic) != 0) {
+		goto fail;
+	}
+	if (network_allocate_and_copy_body_slice(body_buffer,
+											 body_buffer_length,
+											 &body_offset,
+											 msg_out->header.key_length,
+											 &msg_out->key) != 0) {
+		goto fail;
+	}
+	if (network_allocate_and_copy_body_slice(body_buffer,
+											 body_buffer_length,
+											 &body_offset,
+											 msg_out->header.value_length,
+											 &msg_out->value) != 0) {
+		goto fail;
+	}
+	if (body_offset != body_buffer_length)
+		goto fail;
+	if (request_payload_crc32(header_buffer, msg_out) != msg_out->header.crc)
+		goto fail;
+	return 0;
+
+fail:
+	message_destroy(msg_out);
+	return -1;
+}
+
+int network_build_response_buffer(int status_code,
+								  const void *payload,
+								  size_t payload_length,
+								  uint8_t **buffer_out,
+								  size_t *buffer_length_out)
+{
+	uint8_t *response_buffer = NULL;
+	uint8_t *response_cursor = NULL;
+	size_t total_length = 8 + payload_length;
+
+	if (!buffer_out || !buffer_length_out)
+		return -1;
+	*buffer_out = NULL;
+	*buffer_length_out = 0;
+	if (payload_length > 0 && !payload)
+		return -1;
+
+	response_buffer = malloc(total_length);
+	if (!response_buffer)
+		return -1;
+	response_cursor = response_buffer;
+	pack_u32(&response_cursor, (uint32_t)status_code);
+	pack_u32(&response_cursor, (uint32_t)payload_length);
+	if (payload_length > 0)
+		memcpy(response_cursor, payload, payload_length);
+
+	*buffer_out = response_buffer;
+	*buffer_length_out = total_length;
+	return 0;
 }
 
 void network_response_deinit(struct network_response *resp)

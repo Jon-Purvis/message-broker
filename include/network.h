@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #define MAX_PACKET_SIZE 4096
+#define NETWORK_HEADER_WIRE_SIZE 48
 
 enum command_type {
 	CMD_PRODUCE = 1,
@@ -87,6 +88,18 @@ enum network_io_result network_send_from_buffer_step(int fd,
 													  const uint8_t *buffer,
 													  size_t buffer_length,
 													  size_t *bytes_sent_in_out);
+
+int network_decode_packet_buffers(
+	const uint8_t header_buffer[NETWORK_HEADER_WIRE_SIZE],
+	const uint8_t *body_buffer,
+	size_t body_buffer_length,
+	struct message *msg_out);
+
+int network_build_response_buffer(int status_code,
+								  const void *payload,
+								  size_t payload_length,
+								  uint8_t **buffer_out,
+								  size_t *buffer_length_out);
 
 void network_response_deinit(struct network_response *resp);
 
