@@ -128,7 +128,7 @@ void message_refresh_crc(struct message *msg)
 }
 
 int message_init(struct message *msg,
-				 command_type_t cmd,
+				 enum command_type cmd,
 				 uint16_t flags,
 				 const void *topic,
 				 uint32_t topic_length,
@@ -340,10 +340,11 @@ int network_set_nonblocking(int fd)
 	return 0;
 }
 
-network_io_result_t network_recv_into_buffer_step(int fd,
-												  uint8_t *buffer,
-												  size_t buffer_length,
-												  size_t *bytes_received_in_out)
+enum network_io_result network_recv_into_buffer_step(
+	int fd,
+	uint8_t *buffer,
+	size_t buffer_length,
+	size_t *bytes_received_in_out)
 {
 	if (!buffer || !bytes_received_in_out)
 		return NETWORK_IO_ERROR;
@@ -371,10 +372,10 @@ network_io_result_t network_recv_into_buffer_step(int fd,
 	return NETWORK_IO_ERROR;
 }
 
-network_io_result_t network_send_from_buffer_step(int fd,
-												  const uint8_t *buffer,
-												  size_t buffer_length,
-												  size_t *bytes_sent_in_out)
+enum network_io_result network_send_from_buffer_step(int fd,
+													  const uint8_t *buffer,
+													  size_t buffer_length,
+													  size_t *bytes_sent_in_out)
 {
 	if (!buffer || !bytes_sent_in_out)
 		return NETWORK_IO_ERROR;

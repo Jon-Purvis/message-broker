@@ -6,19 +6,19 @@
 
 #define MAX_PACKET_SIZE 4096
 
-typedef enum {
+enum command_type {
 	CMD_PRODUCE = 1,
 	CMD_CONSUME = 2,
 	CMD_CREATE_TOPIC = 3,
-} command_type_t;
+};
 
-typedef enum {
+enum network_io_result {
 	NETWORK_IO_PROGRESS = 0,
 	NETWORK_IO_COMPLETE = 1,
 	NETWORK_IO_WOULD_BLOCK = 2,
 	NETWORK_IO_PEER_CLOSED = 3,
 	NETWORK_IO_ERROR = 4,
-} network_io_result_t;
+};
 
 struct message_header {
 	uint32_t crc;
@@ -50,7 +50,7 @@ struct network_response {
 };
 
 int message_init(struct message *msg,
-				 command_type_t cmd,
+				 enum command_type cmd,
 				 uint16_t flags,
 				 const void *topic,
 				 uint32_t topic_length,
@@ -77,15 +77,16 @@ int network_send_packet(int client_fd, const struct message *msg);
 
 int network_set_nonblocking(int fd);
 
-network_io_result_t network_recv_into_buffer_step(int fd,
-												  uint8_t *buffer,
-												  size_t buffer_length,
-												  size_t *bytes_received_in_out);
+enum network_io_result network_recv_into_buffer_step(
+	int fd,
+	uint8_t *buffer,
+	size_t buffer_length,
+	size_t *bytes_received_in_out);
 
-network_io_result_t network_send_from_buffer_step(int fd,
-												  const uint8_t *buffer,
-												  size_t buffer_length,
-												  size_t *bytes_sent_in_out);
+enum network_io_result network_send_from_buffer_step(int fd,
+													  const uint8_t *buffer,
+													  size_t buffer_length,
+													  size_t *bytes_sent_in_out);
 
 void network_response_deinit(struct network_response *resp);
 
