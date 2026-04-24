@@ -3,6 +3,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netdb.h>
@@ -324,6 +326,80 @@ int network_send_packet(int client_fd, const struct message *msg)
 			return -1;
 	}
 	return 0;
+}
+
+int network_set_nonblocking(int fd)
+{
+	int existing_flags = fcntl(fd, F_GETFL, 0);
+	if (existing_flags == -1)
+		return -1;
+	if ((existing_flags & O_NONBLOCK) != 0)
+		return 0;
+	if (fcntl(fd, F_SETFL, existing_flags | O_NONBLOCK) == -1)
+		return -1;
+	return 0;
+}
+
+network_io_result_t network_recv_into_buffer_step(int fd,
+												  uint8_t *buffer,
+												  size_t buffer_length,
+												  size_t *bytes_received_in_out)
+{
+	if (!buffer || !bytes_received_in_out)
+		return NETWORK_IO_ERROR;
+	if (*bytes_received_in_out > buffer_length)
+		return NETWORK_IO_ERROR;
+	if (*bytes_received_in_out == buffer_length)
+		return NETWORK_IO_COMPLETE;
+
+	ssize_t bytes_read = recv(fd,
+							  buffer + *bytes_received_in_out,
+							  buffer_length - *bytes_received_in_out,
+							  0);
+	if (bytes_read > 0) {
+		*bytes_received_in_out += (size_t)bytes_read;
+		if (*bytes_received_in_out == buffer_length)
+			return NETWORK_IO_COMPLETE;
+		return NETWORK_IO_PROGRESS;
+	}
+	if (bytes_read == 0)
+		return NETWORK_IO_PEER_CLOSED;
+	if (errno == EAGAIN || errno == EWOULDBLOCK)
+		return NETWORK_IO_WOULD_BLOCK;
+	if (errno == EINTR)
+		return NETWORK_IO_PROGRESS;
+	return NETWORK_IO_ERROR;
+}
+
+network_io_result_t network_send_from_buffer_step(int fd,
+												  const uint8_t *buffer,
+												  size_t buffer_length,
+												  size_t *bytes_sent_in_out)
+{
+	if (!buffer || !bytes_sent_in_out)
+		return NETWORK_IO_ERROR;
+	if (*bytes_sent_in_out > buffer_length)
+		return NETWORK_IO_ERROR;
+	if (*bytes_sent_in_out == buffer_length)
+		return NETWORK_IO_COMPLETE;
+
+	ssize_t bytes_written = send(fd,
+								 buffer + *bytes_sent_in_out,
+								 buffer_length - *bytes_sent_in_out,
+								 0);
+	if (bytes_written > 0) {
+		*bytes_sent_in_out += (size_t)bytes_written;
+		if (*bytes_sent_in_out == buffer_length)
+			return NETWORK_IO_COMPLETE;
+		return NETWORK_IO_PROGRESS;
+	}
+	if (bytes_written == 0)
+		return NETWORK_IO_PROGRESS;
+	if (errno == EAGAIN || errno == EWOULDBLOCK)
+		return NETWORK_IO_WOULD_BLOCK;
+	if (errno == EINTR)
+		return NETWORK_IO_PROGRESS;
+	return NETWORK_IO_ERROR;
 }
 
 void network_response_deinit(struct network_response *resp)

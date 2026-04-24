@@ -12,6 +12,14 @@ typedef enum {
 	CMD_CREATE_TOPIC = 3,
 } command_type_t;
 
+typedef enum {
+	NETWORK_IO_PROGRESS = 0,
+	NETWORK_IO_COMPLETE = 1,
+	NETWORK_IO_WOULD_BLOCK = 2,
+	NETWORK_IO_PEER_CLOSED = 3,
+	NETWORK_IO_ERROR = 4,
+} network_io_result_t;
+
 struct message_header {
 	uint32_t crc;
 	uint32_t total_size;
@@ -66,6 +74,18 @@ int network_accept(int server_fd);
 int network_recv_packet(int client_fd, struct message *msg);
 
 int network_send_packet(int client_fd, const struct message *msg);
+
+int network_set_nonblocking(int fd);
+
+network_io_result_t network_recv_into_buffer_step(int fd,
+												  uint8_t *buffer,
+												  size_t buffer_length,
+												  size_t *bytes_received_in_out);
+
+network_io_result_t network_send_from_buffer_step(int fd,
+												  const uint8_t *buffer,
+												  size_t buffer_length,
+												  size_t *bytes_sent_in_out);
 
 void network_response_deinit(struct network_response *resp);
 
