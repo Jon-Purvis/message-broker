@@ -1,5 +1,5 @@
 CC = cc
-CFLAGS = -std=c11 -Wall -Wextra -Werror -O2
+CFLAGS = -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -O2
 LDFLAGS = -lz
 
 .PHONY: all clean
