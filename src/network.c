@@ -13,17 +13,11 @@
 #include "../include/network.h"
 #include "../include/util.h"
 
-/*
- * Wire: 48-byte big-endian header (see message_header), then topic, key, value.
- * CRC: zlib CRC32 over header[4..48) plus topic, key, value (crc field
- * excluded).
- */
 static uint32_t request_payload_crc32(const uint8_t *header_wire,
 									  const struct message *msg)
 {
 	uLong crc = crc32(0L, Z_NULL, 0);
-	crc = crc32(
-		crc, header_wire + 4, (uInt)(NETWORK_HEADER_WIRE_SIZE - 4));
+	crc = crc32(crc, header_wire + 4, (uInt)(NETWORK_HEADER_WIRE_SIZE - 4));
 	if (msg->header.topic_length > 0 && msg->topic)
 		crc = crc32(
 			crc, (const Bytef *)msg->topic, (uInt)msg->header.topic_length);
@@ -54,9 +48,8 @@ static void pack_wire_header(uint8_t hdr[NETWORK_HEADER_WIRE_SIZE],
 	pack_u32(&p, msg->header.create_partition_count);
 }
 
-static void unpack_wire_header(
-	const uint8_t hdr[NETWORK_HEADER_WIRE_SIZE],
-	struct message *msg)
+static void unpack_wire_header(const uint8_t hdr[NETWORK_HEADER_WIRE_SIZE],
+							   struct message *msg)
 {
 	const uint8_t *p = hdr;
 
@@ -195,6 +188,45 @@ void message_destroy(struct message *msg)
 	msg->value = NULL;
 }
 
+int network_connect(const char *host, uint16_t port)
+{
+	char port_str[6];
+	struct addrinfo hints;
+	struct addrinfo *result = NULL;
+	struct addrinfo *cursor = NULL;
+
+	if (!host)
+		return -1;
+
+	snprintf(port_str, sizeof port_str, "%u", port);
+	memset(&hints, 0, sizeof hints);
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_STREAM;
+
+	int rv = getaddrinfo(host, port_str, &hints, &result);
+	if (rv != 0) {
+		fprintf(stderr, "getaddrinfo: %s\n", gai_strerror(rv));
+		return -1;
+	}
+
+	int sockfd = -1;
+	for (cursor = result; cursor != NULL; cursor = cursor->ai_next) {
+		sockfd =
+			socket(cursor->ai_family, cursor->ai_socktype, cursor->ai_protocol);
+		if (sockfd == -1)
+			continue;
+		if (connect(sockfd, cursor->ai_addr, cursor->ai_addrlen) == -1) {
+			close(sockfd);
+			sockfd = -1;
+			continue;
+		}
+		break;
+	}
+
+	freeaddrinfo(result);
+	return sockfd;
+}
+
 int network_listen(uint16_t port)
 {
 	char port_str[6];
@@ -272,8 +304,8 @@ int network_recv_packet(int client_fd, struct message *msg)
 	unpack_wire_header(header_buf, msg);
 
 	uint32_t expected_body = NETWORK_HEADER_WIRE_SIZE +
-		msg->header.topic_length +
-		msg->header.key_length + msg->header.value_length;
+		msg->header.topic_length + msg->header.key_length +
+		msg->header.value_length;
 	if (msg->header.total_size != expected_body)
 		return -1;
 
@@ -403,12 +435,12 @@ enum network_io_result network_send_from_buffer_step(int fd,
 	return NETWORK_IO_ERROR;
 }
 
-static int network_allocate_and_copy_body_slice(
-	const uint8_t *request_body_buffer,
-	size_t request_body_length,
-	size_t *request_body_offset_in_out,
-	uint32_t field_length,
-	void **field_out)
+static int
+network_allocate_and_copy_body_slice(const uint8_t *request_body_buffer,
+									 size_t request_body_length,
+									 size_t *request_body_offset_in_out,
+									 uint32_t field_length,
+									 void **field_out)
 {
 	if (!request_body_offset_in_out || !field_out)
 		return -1;
@@ -427,8 +459,9 @@ static int network_allocate_and_copy_body_slice(
 	void *allocated_field = malloc(field_length);
 	if (!allocated_field)
 		return -1;
-	memcpy(
-		allocated_field, request_body_buffer + *request_body_offset_in_out, field_length);
+	memcpy(allocated_field,
+		   request_body_buffer + *request_body_offset_in_out,
+		   field_length);
 	*request_body_offset_in_out += field_length;
 	*field_out = allocated_field;
 	return 0;
