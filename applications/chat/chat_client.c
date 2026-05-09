@@ -15,10 +15,10 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "client.h"
-#include "client_config.h"
-#include "network.h"
-#include "record.h"
+#include "../../include/client.h"
+#include "../../include/client_config.h"
+#include "../../include/network.h"
+#include "../../include/record.h"
 
 #define DEFAULT_BROKER_HOST "127.0.0.1"
 #define DEFAULT_BROKER_PORT 3490

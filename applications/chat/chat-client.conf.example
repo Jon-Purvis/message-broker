@@ -1,0 +1,9 @@
+# Group chat reads optional ./broker.conf first, then ./chat-client.conf
+# (both may be omitted). Later file wins duplicate keys.
+# Precedence vs argv: [<host>] [<port>] override file when given.
+#
+# BROKER_HOSTS still overrides host list for connects when set in the shell.
+
+host = 127.0.0.1
+port = 3490
+#hosts = 192.168.1.11,192.168.1.12

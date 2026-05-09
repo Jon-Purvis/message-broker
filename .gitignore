@@ -1,5 +1,9 @@
 .DS_Store
 
+broker.conf
+broker-cli.conf
+chat-client.conf
+
 *.o
 *.a
 build/

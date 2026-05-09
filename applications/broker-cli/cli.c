@@ -4,9 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "client.h"
-#include "client_config.h"
-#include "record.h"
+#include "../../include/client.h"
+#include "../../include/client_config.h"
+#include "../../include/record.h"
 
 static void trim_newline(char *s)
 {
@@ -86,7 +86,7 @@ int main(void)
 		printf("5) Disconnect\n");
 		printf(
 			"7) Connect via broker.conf "
-			"(optional file in working directory)\n");
+			"(see applications/broker-cli/broker-cli.conf.example)\n");
 		printf("8) Quit\n");
 		printf("Choice: ");
 
