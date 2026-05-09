@@ -4,6 +4,8 @@
 #include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#include "broker_config.h"
 #include "topic.h"
 #include "network.h"
 
@@ -41,9 +43,12 @@ struct broker {
 	/* Optional one-way replica (leader forwards produces / creates here). */
 	char *replica_host;
 	uint16_t replica_port;
+	size_t max_request_frame_size_bytes;
+	int log_topic_actions;
+	int log_client_io;
 };
 
-int broker_init(struct broker *broker, const char *data_dir, uint16_t port);
+int broker_init(struct broker *broker, const struct broker_config *config);
 
 void broker_destroy(struct broker *broker);
 

@@ -15,15 +15,17 @@
 #include "../include/util.h"
 
 static volatile sig_atomic_t *global_stop_flag = NULL;
-static const size_t broker_max_request_frame_size_bytes = 1024U * 1024U;
 
-static void broker_log_topic_action(const char *action,
+static void broker_log_topic_action(struct broker *broker,
+									const char *action,
 									const struct message *message,
 									const char *suffix)
 {
 	char topic_name[128];
 	size_t copy_len;
 
+	if (!broker || !broker->log_topic_actions)
+		return;
 	if (!action || !message || !message->topic || message->header.topic_length == 0)
 		return;
 	copy_len = message->header.topic_length;
@@ -122,6 +124,7 @@ static void broker_connection_prepare_for_next_request(
 }
 
 static int broker_parse_expected_body_length(
+	struct broker *broker,
 	const uint8_t header_buffer[NETWORK_HEADER_WIRE_SIZE],
 	size_t *expected_body_length_out)
 {
@@ -142,7 +145,7 @@ static int broker_parse_expected_body_length(
 	(void)ignored_msg_type;
 	(void)ignored_flags;
 
-	if (!expected_body_length_out)
+	if (!broker || !expected_body_length_out)
 		return -1;
 
 	expected_body_length =
@@ -150,7 +153,7 @@ static int broker_parse_expected_body_length(
 	expected_total_size = NETWORK_HEADER_WIRE_SIZE + expected_body_length;
 	if (expected_total_size != (size_t)total_size)
 		return -1;
-	if (expected_total_size > broker_max_request_frame_size_bytes)
+	if (expected_total_size > broker->max_request_frame_size_bytes)
 		return -1;
 
 	*expected_body_length_out = expected_body_length;
@@ -379,9 +382,17 @@ static int serialize_record_payload(const struct record *record,
 	return 0;
 }
 
-int broker_init(struct broker *broker, const char *data_dir, uint16_t port)
+int broker_init(struct broker *broker, const struct broker_config *config)
 {
-	if (!broker || !data_dir)
+	const char *data_dir;
+
+	if (!broker || !config)
+		return -1;
+	data_dir = config->data_dir;
+	if (!data_dir || data_dir[0] == '\0')
+		return -1;
+	if (config->max_request_frame_bytes < BROKER_CONFIG_MIN_FRAME_BYTES ||
+		config->max_request_frame_bytes > BROKER_CONFIG_MAX_FRAME_BYTES)
 		return -1;
 
 	memset(broker, 0, sizeof(*broker));
@@ -391,14 +402,16 @@ int broker_init(struct broker *broker, const char *data_dir, uint16_t port)
 	broker->data_dir = strdup(data_dir);
 	if (!broker->data_dir)
 		return -1;
-	broker->port = port;
+	broker->port = config->listen_port;
+	broker->max_request_frame_size_bytes = config->max_request_frame_bytes;
+	broker->log_topic_actions = config->log_topic_actions ? 1 : 0;
+	broker->log_client_io = config->log_client_io ? 1 : 0;
 
 	global_stop_flag = &broker->stop_requested;
 	if (signal(SIGINT, handle_sigint) == SIG_ERR)
 		return -1;
 
-	int result = mkdir(data_dir, 0700);
-	if (result == -1)
+	if (mkdir(data_dir, 0700) == -1)
 		if (errno != EEXIST)
 			return -1;
 
@@ -410,26 +423,12 @@ int broker_init(struct broker *broker, const char *data_dir, uint16_t port)
 
 	broker->replica_host = NULL;
 	broker->replica_port = 0;
-	{
-		const char *replica_host_env = getenv("BROKER_REPLICA_HOST");
-		const char *replica_port_env = getenv("BROKER_REPLICA_PORT");
-
-		if (replica_host_env != NULL && replica_host_env[0] != '\0') {
-			broker->replica_host = strdup(replica_host_env);
-			if (broker->replica_host == NULL)
-				return -1;
-			broker->replica_port = broker->port;
-			if (replica_port_env != NULL && replica_port_env[0] != '\0') {
-				unsigned long parsed_port =
-					strtoul(replica_port_env, NULL, 10);
-				if (parsed_port == 0UL || parsed_port > 65535UL) {
-					free(broker->replica_host);
-					broker->replica_host = NULL;
-					return -1;
-				}
-				broker->replica_port = (uint16_t)parsed_port;
-			}
-		}
+	if (config->replica_host != NULL && config->replica_host[0] != '\0') {
+		broker->replica_host = strdup(config->replica_host);
+		if (broker->replica_host == NULL)
+			return -1;
+		broker->replica_port =
+			config->replica_port != 0 ? config->replica_port : broker->port;
 	}
 
 	return 0;
@@ -506,7 +505,7 @@ static int handle_cmd_produce(struct broker *broker,
 				 assigned_partition,
 				 record.header.offset,
 				 message->header.value_length);
-		broker_log_topic_action("produce", message, details);
+		broker_log_topic_action(broker, "produce", message, details);
 		if (broker->replica_host != NULL)
 			broker_forward_replicate_produce(
 				broker, target_topic, assigned_partition, &record, message);
@@ -544,7 +543,7 @@ static int handle_cmd_consume(struct broker *broker,
 				 "partition=%u offset=%" PRIu64 " status=miss",
 				 message->header.partition_index,
 				 message->header.consume_offset);
-		broker_log_topic_action("consume", message, details);
+		broker_log_topic_action(broker, "consume", message, details);
 		return -1;
 	}
 	{
@@ -555,7 +554,7 @@ static int handle_cmd_consume(struct broker *broker,
 				 message->header.partition_index,
 				 message->header.consume_offset,
 				 record.header.value_length);
-		broker_log_topic_action("consume", message, details);
+		broker_log_topic_action(broker, "consume", message, details);
 	}
 
 	if (serialize_record_payload(
@@ -591,7 +590,7 @@ static int handle_cmd_create_topic(struct broker *broker, struct message *messag
 				 sizeof(details),
 				 "partitions=%u",
 				 message->header.create_partition_count);
-		broker_log_topic_action("create_topic", message, details);
+		broker_log_topic_action(broker, "create_topic", message, details);
 	}
 
 	free(topic_name);
@@ -736,8 +735,10 @@ static void broker_accept_pending_connections(struct broker *broker)
 		connection->fd = accepted_client_fd;
 		if (network_set_nonblocking(connection->fd) != 0)
 			broker_connection_reset_state(connection);
-		else
-			fprintf(stderr, "[broker] client connected fd=%d\n", connection->fd);
+		else if (broker->log_client_io)
+			fprintf(stderr,
+					"[broker] client connected fd=%d\n",
+					connection->fd);
 	}
 }
 
@@ -772,9 +773,11 @@ static int broker_decode_and_handle_complete_request(
 	return 0;
 }
 
-static int broker_try_read_request_header(struct broker_connection *connection)
+static int broker_try_read_request_header(struct broker *broker,
+										  struct broker_connection *connection)
 {
-	if (!connection || connection->phase != BROKER_CONNECTION_PHASE_READ_HEADER)
+	if (!broker || !connection ||
+		connection->phase != BROKER_CONNECTION_PHASE_READ_HEADER)
 		return 0;
 
 	enum network_io_result read_result = network_recv_into_buffer_step(
@@ -788,7 +791,8 @@ static int broker_try_read_request_header(struct broker_connection *connection)
 	if (read_result != NETWORK_IO_COMPLETE)
 		return 0;
 
-	if (broker_parse_expected_body_length(connection->incoming_header_buffer,
+	if (broker_parse_expected_body_length(broker,
+										  connection->incoming_header_buffer,
 										  &connection->incoming_body_length) != 0) {
 		return -1;
 	}
@@ -857,15 +861,22 @@ static void broker_process_connection_events(struct broker *broker,
 	if (!broker || !connection || !connection->is_in_use)
 		return;
 	if ((revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-		fprintf(stderr, "[broker] client disconnected fd=%d\n", connection->fd);
+		if (broker->log_client_io)
+			fprintf(stderr,
+					"[broker] client disconnected fd=%d\n",
+					connection->fd);
 		broker_connection_reset_state(connection);
 		return;
 	}
 
 	if ((revents & POLLIN) != 0) {
-		int header_read_step_result = broker_try_read_request_header(connection);
+		int header_read_step_result =
+			broker_try_read_request_header(broker, connection);
 		if (header_read_step_result < 0) {
-			fprintf(stderr, "[broker] client read error fd=%d\n", connection->fd);
+			if (broker->log_client_io)
+				fprintf(stderr,
+						"[broker] client read error fd=%d\n",
+						connection->fd);
 			broker_connection_reset_state(connection);
 			return;
 		}
@@ -873,7 +884,10 @@ static void broker_process_connection_events(struct broker *broker,
 		int body_read_step_result =
 			broker_try_read_request_body(broker, connection);
 		if (body_read_step_result < 0) {
-			fprintf(stderr, "[broker] client request error fd=%d\n", connection->fd);
+			if (broker->log_client_io)
+				fprintf(stderr,
+						"[broker] client request error fd=%d\n",
+						connection->fd);
 			broker_connection_reset_state(connection);
 			return;
 		}
@@ -881,7 +895,10 @@ static void broker_process_connection_events(struct broker *broker,
 
 	if ((revents & POLLOUT) != 0) {
 		if (broker_try_flush_response(connection) != 0) {
-			fprintf(stderr, "[broker] client write error fd=%d\n", connection->fd);
+			if (broker->log_client_io)
+				fprintf(stderr,
+						"[broker] client write error fd=%d\n",
+						connection->fd);
 			broker_connection_reset_state(connection);
 		}
 	}

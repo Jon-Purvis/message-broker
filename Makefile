@@ -3,7 +3,9 @@ BUILD_DIR ?= build
 OBJDIR = $(BUILD_DIR)/obj
 
 CC = cc
-CFLAGS = -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -O2
+INCLUDES = -Iinclude
+CFLAGS = -std=c11 -D_DEFAULT_SOURCE -D_POSIX_C_SOURCE=200809L -Wall -Wextra -Werror -O2 \
+	$(INCLUDES)
 LDFLAGS = -lz
 RANLIB = ranlib
 
@@ -11,7 +13,8 @@ LIB_A = $(BUILD_DIR)/libmessagebroker.a
 
 OBJS_SHARED = $(OBJDIR)/network.o $(OBJDIR)/record.o
 OBJS_LIB = $(OBJDIR)/client.o $(OBJS_SHARED)
-OBJS_BROKER = $(OBJDIR)/main.o $(OBJDIR)/broker.o $(OBJDIR)/topic.o \
+OBJS_BROKER = $(OBJDIR)/main.o $(OBJDIR)/broker.o $(OBJDIR)/broker_config.o \
+	$(OBJDIR)/topic.o \
 	$(OBJDIR)/partition.o $(OBJDIR)/segment.o $(OBJS_SHARED)
 
 BROKER_BIN = $(BUILD_DIR)/broker
