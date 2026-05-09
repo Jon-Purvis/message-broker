@@ -4,8 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/client.h"
-#include "../include/record.h"
+#include "client.h"
+#include "client_config.h"
+#include "record.h"
 
 static void trim_newline(char *s)
 {
@@ -14,7 +15,8 @@ static void trim_newline(char *s)
 	if (!s)
 		return;
 	length = strlen(s);
-	while (length > 0 && (s[length - 1] == '\n' || s[length - 1] == '\r')) {
+	while (length > 0 &&
+		   (s[length - 1] == '\n' || s[length - 1] == '\r')) {
 		s[length - 1] = '\0';
 		length--;
 	}
@@ -82,7 +84,10 @@ int main(void)
 		printf("3) Produce\n");
 		printf("4) Consume\n");
 		printf("5) Disconnect\n");
-		printf("6) Quit\n");
+		printf(
+			"7) Connect via broker.conf "
+			"(optional file in working directory)\n");
+		printf("8) Quit\n");
 		printf("Choice: ");
 
 		char choice_line[64];
@@ -249,7 +254,13 @@ int main(void)
 			broker_client_close(&client);
 			printf("Disconnected.\n");
 			break;
-		case 6:
+		case 7:
+			if (broker_client_connect_via_config_file(&client, NULL) != 0)
+				fprintf(stderr, "broker.conf connect failed\n");
+			else
+				printf("Connected using broker.conf settings.\n");
+			break;
+		case 8:
 			broker_client_close(&client);
 			return 0;
 		default:

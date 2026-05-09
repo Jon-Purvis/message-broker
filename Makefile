@@ -12,7 +12,7 @@ RANLIB = ranlib
 LIB_A = $(BUILD_DIR)/libmessagebroker.a
 
 OBJS_SHARED = $(OBJDIR)/network.o $(OBJDIR)/record.o
-OBJS_LIB = $(OBJDIR)/client.o $(OBJS_SHARED)
+OBJS_LIB = $(OBJDIR)/client.o $(OBJDIR)/client_config.o $(OBJS_SHARED)
 OBJS_BROKER = $(OBJDIR)/main.o $(OBJDIR)/broker.o $(OBJDIR)/broker_config.o \
 	$(OBJDIR)/topic.o \
 	$(OBJDIR)/partition.o $(OBJDIR)/segment.o $(OBJS_SHARED)
