@@ -179,3 +179,15 @@ int topic_read(struct topic *topic,
 
 	return partition_read(topic->partitions[partition], record, offset);
 }
+
+int topic_replicate_write(struct topic *topic,
+						  uint32_t partition_index,
+						  struct record *record)
+{
+	if (!topic || !topic->partitions ||
+		partition_index >= topic->partition_count || !record)
+		return -1;
+
+	return partition_write_replica(topic->partitions[partition_index],
+								   record);
+}

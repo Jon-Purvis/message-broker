@@ -299,6 +299,15 @@ int partition_write(struct partition *partition, struct record *record)
 	return 0;
 }
 
+int partition_write_replica(struct partition *partition, struct record *record)
+{
+	if (!partition || !partition->active_segment || !record)
+		return -1;
+	if (record->header.offset != partition->active_segment->current_offset)
+		return -1;
+	return partition_write(partition, record);
+}
+
 int partition_read(struct partition *partition,
 				   struct record *record,
 				   uint64_t offset)

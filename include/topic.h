@@ -28,4 +28,8 @@ int topic_read(struct topic *topic,
 			   uint32_t partition,
 			   uint64_t offset);
 
+int topic_replicate_write(struct topic *topic,
+						  uint32_t partition_index,
+						  struct record *record);
+
 #endif
