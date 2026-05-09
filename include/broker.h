@@ -38,6 +38,9 @@ struct broker {
 	int server_fd;
 	uint16_t port;
 	volatile sig_atomic_t stop_requested;
+	/* Optional one-way replica (leader forwards produces / creates here). */
+	char *replica_host;
+	uint16_t replica_port;
 };
 
 int broker_init(struct broker *broker, const char *data_dir, uint16_t port);

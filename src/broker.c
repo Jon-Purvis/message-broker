@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,10 +11,33 @@
 
 #include "../include/broker.h"
 #include "../include/network.h"
+#include "../include/record.h"
 #include "../include/util.h"
 
 static volatile sig_atomic_t *global_stop_flag = NULL;
 static const size_t broker_max_request_frame_size_bytes = 1024U * 1024U;
+
+static void broker_log_topic_action(const char *action,
+									const struct message *message,
+									const char *suffix)
+{
+	char topic_name[128];
+	size_t copy_len;
+
+	if (!action || !message || !message->topic || message->header.topic_length == 0)
+		return;
+	copy_len = message->header.topic_length;
+	if (copy_len >= sizeof(topic_name))
+		copy_len = sizeof(topic_name) - 1;
+	memcpy(topic_name, message->topic, copy_len);
+	topic_name[copy_len] = '\0';
+	fprintf(stderr,
+			"[broker] %s topic=%s%s%s\n",
+			action,
+			topic_name,
+			suffix ? " " : "",
+			suffix ? suffix : "");
+}
 
 static void broker_connection_reset_state(struct broker_connection *connection)
 {
@@ -179,6 +203,158 @@ static int find_topic_from_message(struct broker *broker,
 	return 0;
 }
 
+static void broker_forward_replicate_produce(struct broker *broker,
+											 struct topic *topic,
+											 uint32_t partition_index,
+											 const struct record *record,
+											 const struct message *message)
+{
+	struct message msg;
+	size_t topic_len;
+
+	if (broker->replica_host == NULL || topic == NULL || record == NULL ||
+		message == NULL)
+		return;
+
+	topic_len = strlen(topic->name);
+	if (message_init(&msg,
+					 CMD_REPLICATE,
+					 0,
+					 topic->name,
+					 (uint32_t)topic_len,
+					 message->key,
+					 message->header.key_length,
+					 record->value,
+					 record->header.value_length,
+					 partition_index,
+					 record->header.offset,
+					 0) != 0)
+		return;
+
+	msg.header.timestamp = record->header.timestamp;
+	message_refresh_crc(&msg);
+
+	int fd = network_connect(broker->replica_host, broker->replica_port);
+	if (fd < 0) {
+		fprintf(stderr,
+				"replica: produce forward connect %s:%u failed\n",
+				broker->replica_host,
+				(unsigned)broker->replica_port);
+		message_destroy(&msg);
+		return;
+	}
+
+	if (network_send_packet(fd, &msg) != 0) {
+		fprintf(stderr, "replica: produce forward send failed\n");
+		message_destroy(&msg);
+		close(fd);
+		return;
+	}
+	message_destroy(&msg);
+
+	struct network_response resp;
+	if (network_recv_response(fd, &resp) != 0) {
+		fprintf(stderr, "replica: produce forward recv failed\n");
+		close(fd);
+		return;
+	}
+	if (resp.status_code != 0)
+		fprintf(stderr,
+				"replica: produce follower status=%d\n",
+				resp.status_code);
+	network_response_deinit(&resp);
+	close(fd);
+}
+
+static void broker_forward_replicate_create_topic(struct broker *broker,
+												  const struct message *src)
+{
+	struct message msg;
+
+	if (broker->replica_host == NULL || src == NULL)
+		return;
+
+	if (message_init(&msg,
+					 CMD_CREATE_TOPIC,
+					 0,
+					 src->topic,
+					 src->header.topic_length,
+					 NULL,
+					 0,
+					 NULL,
+					 0,
+					 0,
+					 0,
+					 src->header.create_partition_count) != 0)
+		return;
+
+	msg.header.timestamp = src->header.timestamp;
+	message_refresh_crc(&msg);
+
+	int fd = network_connect(broker->replica_host, broker->replica_port);
+	if (fd < 0) {
+		fprintf(stderr,
+				"replica: create_topic forward connect %s:%u failed\n",
+				broker->replica_host,
+				(unsigned)broker->replica_port);
+		message_destroy(&msg);
+		return;
+	}
+
+	if (network_send_packet(fd, &msg) != 0) {
+		fprintf(stderr, "replica: create_topic forward send failed\n");
+		message_destroy(&msg);
+		close(fd);
+		return;
+	}
+	message_destroy(&msg);
+
+	struct network_response resp;
+	if (network_recv_response(fd, &resp) != 0) {
+		fprintf(stderr, "replica: create_topic forward recv failed\n");
+		close(fd);
+		return;
+	}
+	if (resp.status_code != 0)
+		fprintf(stderr,
+				"replica: create_topic follower status=%d\n",
+				resp.status_code);
+	network_response_deinit(&resp);
+	close(fd);
+}
+
+static int handle_cmd_replicate(struct broker *broker, struct message *message)
+{
+	struct topic *target_topic = NULL;
+	struct record record;
+
+	if (!broker || !message)
+		return -1;
+	if (message->header.value_length == 0 || !message->value)
+		return -1;
+
+	if (find_topic_from_message(broker, message, &target_topic) != 0)
+		return -1;
+
+	memset(&record, 0, sizeof(record));
+	if (record_init(&record,
+					message->header.timestamp,
+					message->header.value_length,
+					message->value) != 0)
+		return -1;
+
+	record.header.offset = message->header.consume_offset;
+
+	if (topic_replicate_write(
+			target_topic, message->header.partition_index, &record) != 0) {
+		record_destroy(&record);
+		return -1;
+	}
+
+	record_destroy(&record);
+	return 0;
+}
+
 static int serialize_record_payload(const struct record *record,
 									uint8_t **payload_out,
 									uint32_t *payload_length_out)
@@ -232,6 +408,30 @@ int broker_init(struct broker *broker, const char *data_dir, uint16_t port)
 	if (network_set_nonblocking(broker->server_fd) != 0)
 		return -1;
 
+	broker->replica_host = NULL;
+	broker->replica_port = 0;
+	{
+		const char *replica_host_env = getenv("BROKER_REPLICA_HOST");
+		const char *replica_port_env = getenv("BROKER_REPLICA_PORT");
+
+		if (replica_host_env != NULL && replica_host_env[0] != '\0') {
+			broker->replica_host = strdup(replica_host_env);
+			if (broker->replica_host == NULL)
+				return -1;
+			broker->replica_port = broker->port;
+			if (replica_port_env != NULL && replica_port_env[0] != '\0') {
+				unsigned long parsed_port =
+					strtoul(replica_port_env, NULL, 10);
+				if (parsed_port == 0UL || parsed_port > 65535UL) {
+					free(broker->replica_host);
+					broker->replica_host = NULL;
+					return -1;
+				}
+				broker->replica_port = (uint16_t)parsed_port;
+			}
+		}
+	}
+
 	return 0;
 }
 
@@ -261,10 +461,15 @@ void broker_destroy(struct broker *broker)
 	broker->topic_count = 0;
 	free(broker->data_dir);
 	broker->data_dir = NULL;
+	free(broker->replica_host);
+	broker->replica_host = NULL;
 	broker->stop_requested = -1;
 }
 
-static int handle_cmd_produce(struct broker *broker, struct message *message)
+static int handle_cmd_produce(struct broker *broker,
+							  struct message *message,
+							  uint32_t *partition_out,
+							  uint64_t *offset_out)
 {
 	if (!broker || !message)
 		return -1;
@@ -285,8 +490,27 @@ static int handle_cmd_produce(struct broker *broker, struct message *message)
 		return -1;
 	}
 
+	uint32_t assigned_partition = 0;
 	int topic_write_result = topic_write(
-		target_topic, message->key, message->header.key_length, &record, NULL);
+		target_topic, message->key, message->header.key_length, &record, &assigned_partition);
+
+	if (topic_write_result == 0) {
+		if (partition_out)
+			*partition_out = assigned_partition;
+		if (offset_out)
+			*offset_out = record.header.offset;
+		char details[128];
+		snprintf(details,
+				 sizeof(details),
+				 "partition=%u offset=%" PRIu64 " bytes=%u",
+				 assigned_partition,
+				 record.header.offset,
+				 message->header.value_length);
+		broker_log_topic_action("produce", message, details);
+		if (broker->replica_host != NULL)
+			broker_forward_replicate_produce(
+				broker, target_topic, assigned_partition, &record, message);
+	}
 
 	record_destroy(&record);
 	return topic_write_result;
@@ -314,7 +538,24 @@ static int handle_cmd_consume(struct broker *broker,
 				   &record,
 				   message->header.partition_index,
 				   message->header.consume_offset) != 0) {
+		char details[128];
+		snprintf(details,
+				 sizeof(details),
+				 "partition=%u offset=%" PRIu64 " status=miss",
+				 message->header.partition_index,
+				 message->header.consume_offset);
+		broker_log_topic_action("consume", message, details);
 		return -1;
+	}
+	{
+		char details[160];
+		snprintf(details,
+				 sizeof(details),
+				 "partition=%u offset=%" PRIu64 " status=hit bytes=%u",
+				 message->header.partition_index,
+				 message->header.consume_offset,
+				 record.header.value_length);
+		broker_log_topic_action("consume", message, details);
 	}
 
 	if (serialize_record_payload(
@@ -344,8 +585,17 @@ static int handle_cmd_create_topic(struct broker *broker, struct message *messag
 		free(topic_name);
 		return -1;
 	}
+	{
+		char details[64];
+		snprintf(details,
+				 sizeof(details),
+				 "partitions=%u",
+				 message->header.create_partition_count);
+		broker_log_topic_action("create_topic", message, details);
+	}
 
 	free(topic_name);
+	broker_forward_replicate_create_topic(broker, message);
 	return 0;
 }
 
@@ -366,10 +616,24 @@ static int broker_build_response_for_message(struct broker *broker,
 	*response_buffer_length_out = 0;
 
 	switch (message->header.msg_type) {
-	case CMD_PRODUCE:
-		if (handle_cmd_produce(broker, message) == 0)
+	case CMD_PRODUCE: {
+		uint32_t produced_partition = 0;
+		uint64_t produced_offset = 0;
+
+		if (handle_cmd_produce(
+				broker, message, &produced_partition, &produced_offset) == 0) {
 			response_status_code = 0;
+			response_payload_length = 12;
+			response_payload = malloc(response_payload_length);
+			if (!response_payload)
+				return -1;
+			uint8_t *payload_writer = response_payload;
+
+			pack_u32(&payload_writer, produced_partition);
+			pack_u64(&payload_writer, produced_offset);
+		}
 		break;
+	}
 
 	case CMD_CONSUME:
 		if (handle_cmd_consume(
@@ -381,6 +645,11 @@ static int broker_build_response_for_message(struct broker *broker,
 
 	case CMD_CREATE_TOPIC:
 		if (handle_cmd_create_topic(broker, message) == 0)
+			response_status_code = 0;
+		break;
+
+	case CMD_REPLICATE:
+		if (handle_cmd_replicate(broker, message) == 0)
 			response_status_code = 0;
 		break;
 
@@ -467,6 +736,8 @@ static void broker_accept_pending_connections(struct broker *broker)
 		connection->fd = accepted_client_fd;
 		if (network_set_nonblocking(connection->fd) != 0)
 			broker_connection_reset_state(connection);
+		else
+			fprintf(stderr, "[broker] client connected fd=%d\n", connection->fd);
 	}
 }
 
@@ -586,6 +857,7 @@ static void broker_process_connection_events(struct broker *broker,
 	if (!broker || !connection || !connection->is_in_use)
 		return;
 	if ((revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+		fprintf(stderr, "[broker] client disconnected fd=%d\n", connection->fd);
 		broker_connection_reset_state(connection);
 		return;
 	}
@@ -593,6 +865,7 @@ static void broker_process_connection_events(struct broker *broker,
 	if ((revents & POLLIN) != 0) {
 		int header_read_step_result = broker_try_read_request_header(connection);
 		if (header_read_step_result < 0) {
+			fprintf(stderr, "[broker] client read error fd=%d\n", connection->fd);
 			broker_connection_reset_state(connection);
 			return;
 		}
@@ -600,14 +873,17 @@ static void broker_process_connection_events(struct broker *broker,
 		int body_read_step_result =
 			broker_try_read_request_body(broker, connection);
 		if (body_read_step_result < 0) {
+			fprintf(stderr, "[broker] client request error fd=%d\n", connection->fd);
 			broker_connection_reset_state(connection);
 			return;
 		}
 	}
 
 	if ((revents & POLLOUT) != 0) {
-		if (broker_try_flush_response(connection) != 0)
+		if (broker_try_flush_response(connection) != 0) {
+			fprintf(stderr, "[broker] client write error fd=%d\n", connection->fd);
 			broker_connection_reset_state(connection);
+		}
 	}
 }
 
@@ -650,11 +926,19 @@ int broker_create_topic(struct broker *broker,
 						const char *name,
 						uint32_t partition_count)
 {
+	struct topic *existing;
+
 	if (!broker || !name)
 		return -1;
-	if (broker->topic_count >= BROKER_MAX_TOPICS)
+
+	existing = broker_find_topic(broker, name);
+	if (existing != NULL) {
+		if (existing->partition_count == partition_count)
+			return 0;
 		return -1;
-	if (broker_find_topic(broker, name) != NULL)
+	}
+
+	if (broker->topic_count >= BROKER_MAX_TOPICS)
 		return -1;
 
 	struct topic *topic = malloc(sizeof(struct topic));
