@@ -266,7 +266,8 @@ static void broker_forward_replicate_produce(struct broker *broker,
 		fprintf(
 			stderr, "replica: produce follower status=%d\n", resp.status_code);
 	else if (broker->log_topic_actions != 0)
-		fprintf(stderr,
+		fprintf(
+			stderr,
 			"[broker] replica_ack produce topic=%s partition=%u offset=%" PRIu64
 			"\n",
 			topic->name,
@@ -327,14 +328,14 @@ static void broker_forward_replicate_create_topic(struct broker *broker,
 	}
 	if (resp.status_code != 0)
 		fprintf(stderr,
-			"replica: create_topic follower status=%d\n",
-			resp.status_code);
+				"replica: create_topic follower status=%d\n",
+				resp.status_code);
 	else if (broker->log_topic_actions != 0)
 		fprintf(stderr,
-			"[broker] replica_ack create_topic topic=%.*s partitions=%u\n",
-			(int)src->header.topic_length,
-			(const char *)src->topic,
-			(unsigned)src->header.create_partition_count);
+				"[broker] replica_ack create_topic topic=%.*s partitions=%u\n",
+				(int)src->header.topic_length,
+				(const char *)src->topic,
+				(unsigned)src->header.create_partition_count);
 	network_response_deinit(&resp);
 	close(fd);
 }
@@ -395,6 +396,41 @@ static int serialize_record_payload(const struct record *record,
 	return 0;
 }
 
+static int broker_create_directory_path(const char *path)
+{
+	char *mutable_path;
+	size_t index;
+
+	if (!path || path[0] == '\0')
+		return -1;
+	mutable_path = strdup(path);
+	if (!mutable_path)
+		return -1;
+	for (index = strlen(mutable_path);
+		 index > 1 && mutable_path[index - 1] == '/';
+		 index--)
+		mutable_path[index - 1] = '\0';
+
+	for (index = 1; mutable_path[index] != '\0'; index++) {
+		if (mutable_path[index] != '/')
+			continue;
+		if (mutable_path[index - 1] == '/')
+			continue;
+		mutable_path[index] = '\0';
+		if (mkdir(mutable_path, 0700) != 0 && errno != EEXIST) {
+			free(mutable_path);
+			return -1;
+		}
+		mutable_path[index] = '/';
+	}
+	if (mkdir(mutable_path, 0700) != 0 && errno != EEXIST) {
+		free(mutable_path);
+		return -1;
+	}
+	free(mutable_path);
+	return 0;
+}
+
 int broker_init(struct broker *broker, const struct broker_config *config)
 {
 	const char *data_dir;
@@ -425,9 +461,8 @@ int broker_init(struct broker *broker, const struct broker_config *config)
 	if (signal(SIGINT, handle_sigint) == SIG_ERR)
 		return -1;
 
-	if (mkdir(data_dir, 0700) == -1)
-		if (errno != EEXIST)
-			return -1;
+	if (broker_create_directory_path(data_dir) != 0)
+		return -1;
 
 	broker->server_fd = network_listen(broker->port);
 	if (broker->server_fd == -1)
