@@ -1,5 +1,6 @@
-# client-side settings consumed by libmessagebroker (unknown keys ignored).
-# copy next to broker_cli cwd as broker.conf, or merge into repo-root broker.conf.
+# Client-side settings consumed by libmessagebroker (unknown keys ignored).
+# Copy to ./broker.conf next to where you run ./build/broker_cli (repo root).
+# broker_cli menu "1) Connect" loads that file.
 
 brokers = 127.0.0.1:3490
 #brokers = 127.0.0.1:3490,127.0.0.1:3491

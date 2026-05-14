@@ -72,21 +72,17 @@ static int require_connected(struct broker_client *client)
 int main(void)
 {
 	struct broker_client client;
-	char endpoint_saved[256] = "127.0.0.1:3490";
 
 	broker_client_init(&client);
 
 	for (;;) {
 		printf("\n--- Message broker CLI ---\n");
-		printf("1) Connect\n");
+		printf("1) Connect (./broker.conf)\n");
 		printf("2) Create topic\n");
 		printf("3) Produce\n");
 		printf("4) Consume\n");
 		printf("5) Disconnect\n");
-		printf(
-			"7) Connect via broker.conf "
-			"(see applications/broker-cli/broker-cli.conf.example)\n");
-		printf("8) Quit\n");
+		printf("6) Quit\n");
 		printf("Choice: ");
 
 		char choice_line[64];
@@ -96,25 +92,12 @@ int main(void)
 		const int menu_choice = atoi(choice_line);
 
 		switch (menu_choice) {
-		case 1: {
-			char endpoint_input[256];
-
-			read_line("Broker host:port [127.0.0.1:3490]: ",
-				  endpoint_input,
-				  sizeof endpoint_input);
-			if (endpoint_input[0] != '\0') {
-				strncpy(endpoint_saved,
-					endpoint_input,
-					sizeof endpoint_saved - 1);
-				endpoint_saved[sizeof endpoint_saved - 1] = '\0';
-			}
-
-			if (broker_client_connect(&client, endpoint_saved) != 0)
-				fprintf(stderr, "connect failed\n");
+		case 1:
+			if (broker_client_connect_via_config_file(&client, NULL) != 0)
+				fprintf(stderr, "broker.conf connect failed\n");
 			else
-				printf("Connected to %s\n", endpoint_saved);
+				printf("Connected using ./broker.conf\n");
 			break;
-		}
 		case 2: {
 			if (require_connected(&client) != 0)
 				break;
@@ -252,13 +235,7 @@ int main(void)
 			broker_client_close(&client);
 			printf("Disconnected.\n");
 			break;
-		case 7:
-			if (broker_client_connect_via_config_file(&client, NULL) != 0)
-				fprintf(stderr, "broker.conf connect failed\n");
-			else
-				printf("Connected using broker.conf settings.\n");
-			break;
-		case 8:
+		case 6:
 			broker_client_close(&client);
 			return 0;
 		default:
