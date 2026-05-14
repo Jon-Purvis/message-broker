@@ -1,6 +1,6 @@
-# Align clangd / Cursor C diagnostics with Makefile (headers live in ./include).
 CompileFlags:
   Add:
+    - -xc-header
     - -Iinclude
     - -std=c11
     - -Wall
