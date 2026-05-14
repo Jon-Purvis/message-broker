@@ -162,6 +162,12 @@ static int broker_config_apply_line(struct broker_config *config, char *line)
 		config->log_topic_actions = bool_out;
 		return 0;
 	}
+	if (strcasecmp(key, "log_consume_miss_actions") == 0) {
+		if (broker_config_parse_bool(value, &bool_out) != 0)
+			return -1;
+		config->log_consume_miss_actions = bool_out;
+		return 0;
+	}
 	if (strcasecmp(key, "log_client_io") == 0) {
 		if (broker_config_parse_bool(value, &bool_out) != 0)
 			return -1;
@@ -182,6 +188,7 @@ void broker_config_set_defaults(struct broker_config *config)
 	config->listen_port = 3490;
 	config->max_request_frame_bytes = 1024UL * 1024UL;
 	config->log_topic_actions = 1;
+	config->log_consume_miss_actions = 0;
 	config->log_client_io = 1;
 }
 

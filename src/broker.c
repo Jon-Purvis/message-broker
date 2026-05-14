@@ -26,7 +26,8 @@ static void broker_log_topic_action(struct broker *broker,
 
 	if (!broker || !broker->log_topic_actions)
 		return;
-	if (!action || !message || !message->topic || message->header.topic_length == 0)
+	if (!action || !message || !message->topic ||
+		message->header.topic_length == 0)
 		return;
 	copy_len = message->header.topic_length;
 	if (copy_len >= sizeof(topic_name))
@@ -79,8 +80,8 @@ static void broker_connection_table_init(struct broker *broker)
 	}
 }
 
-static struct broker_connection *broker_connection_acquire_free_slot(
-	struct broker *broker)
+static struct broker_connection *
+broker_connection_acquire_free_slot(struct broker *broker)
 {
 	if (!broker)
 		return NULL;
@@ -103,8 +104,8 @@ static struct broker_connection *broker_connection_acquire_free_slot(
 	return NULL;
 }
 
-static void broker_connection_prepare_for_next_request(
-	struct broker_connection *connection)
+static void
+broker_connection_prepare_for_next_request(struct broker_connection *connection)
 {
 	if (!connection)
 		return;
@@ -262,9 +263,8 @@ static void broker_forward_replicate_produce(struct broker *broker,
 		return;
 	}
 	if (resp.status_code != 0)
-		fprintf(stderr,
-				"replica: produce follower status=%d\n",
-				resp.status_code);
+		fprintf(
+			stderr, "replica: produce follower status=%d\n", resp.status_code);
 	network_response_deinit(&resp);
 	close(fd);
 }
@@ -405,6 +405,7 @@ int broker_init(struct broker *broker, const struct broker_config *config)
 	broker->port = config->listen_port;
 	broker->max_request_frame_size_bytes = config->max_request_frame_bytes;
 	broker->log_topic_actions = config->log_topic_actions ? 1 : 0;
+	broker->log_consume_miss_actions = config->log_consume_miss_actions ? 1 : 0;
 	broker->log_client_io = config->log_client_io ? 1 : 0;
 
 	global_stop_flag = &broker->stop_requested;
@@ -490,8 +491,11 @@ static int handle_cmd_produce(struct broker *broker,
 	}
 
 	uint32_t assigned_partition = 0;
-	int topic_write_result = topic_write(
-		target_topic, message->key, message->header.key_length, &record, &assigned_partition);
+	int topic_write_result = topic_write(target_topic,
+										 message->key,
+										 message->header.key_length,
+										 &record,
+										 &assigned_partition);
 
 	if (topic_write_result == 0) {
 		if (partition_out)
@@ -537,13 +541,15 @@ static int handle_cmd_consume(struct broker *broker,
 				   &record,
 				   message->header.partition_index,
 				   message->header.consume_offset) != 0) {
-		char details[128];
-		snprintf(details,
-				 sizeof(details),
-				 "partition=%u offset=%" PRIu64 " status=miss",
-				 message->header.partition_index,
-				 message->header.consume_offset);
-		broker_log_topic_action(broker, "consume", message, details);
+		if (broker->log_consume_miss_actions != 0) {
+			char details[128];
+			snprintf(details,
+					 sizeof(details),
+					 "partition=%u offset=%" PRIu64 " status=miss",
+					 message->header.partition_index,
+					 message->header.consume_offset);
+			broker_log_topic_action(broker, "consume", message, details);
+		}
 		return -1;
 	}
 	{
@@ -567,7 +573,8 @@ static int handle_cmd_consume(struct broker *broker,
 	return 0;
 }
 
-static int handle_cmd_create_topic(struct broker *broker, struct message *message)
+static int handle_cmd_create_topic(struct broker *broker,
+								   struct message *message)
 {
 	if (!broker || !message)
 		return -1;
@@ -652,7 +659,8 @@ static int broker_build_response_for_message(struct broker *broker,
 			response_status_code = 0;
 		break;
 
-	default: break;
+	default:
+		break;
 	}
 
 	if (network_build_response_buffer(response_status_code,
@@ -700,7 +708,8 @@ static nfds_t broker_build_poll_descriptors(
 
 	for (size_t connection_index = 0; connection_index < BROKER_MAX_CONNECTIONS;
 		 connection_index++) {
-		struct broker_connection *connection = &broker->connections[connection_index];
+		struct broker_connection *connection =
+			&broker->connections[connection_index];
 		if (!connection->is_in_use)
 			continue;
 		poll_fds[poll_count].fd = connection->fd;
@@ -736,14 +745,14 @@ static void broker_accept_pending_connections(struct broker *broker)
 		if (network_set_nonblocking(connection->fd) != 0)
 			broker_connection_reset_state(connection);
 		else if (broker->log_client_io)
-			fprintf(stderr,
-					"[broker] client connected fd=%d\n",
-					connection->fd);
+			fprintf(
+				stderr, "[broker] client connected fd=%d\n", connection->fd);
 	}
 }
 
-static int broker_decode_and_handle_complete_request(
-	struct broker *broker, struct broker_connection *connection)
+static int
+broker_decode_and_handle_complete_request(struct broker *broker,
+										  struct broker_connection *connection)
 {
 	struct message message;
 	uint8_t *response_buffer = NULL;
@@ -786,14 +795,16 @@ static int broker_try_read_request_header(struct broker *broker,
 		NETWORK_HEADER_WIRE_SIZE,
 		&connection->incoming_header_bytes_received);
 
-	if (read_result == NETWORK_IO_PEER_CLOSED || read_result == NETWORK_IO_ERROR)
+	if (read_result == NETWORK_IO_PEER_CLOSED ||
+		read_result == NETWORK_IO_ERROR)
 		return -1;
 	if (read_result != NETWORK_IO_COMPLETE)
 		return 0;
 
 	if (broker_parse_expected_body_length(broker,
 										  connection->incoming_header_buffer,
-										  &connection->incoming_body_length) != 0) {
+										  &connection->incoming_body_length) !=
+		0) {
 		return -1;
 	}
 
@@ -847,24 +858,23 @@ static int broker_try_flush_response(struct broker_connection *connection)
 		connection->outgoing_response_length,
 		&connection->outgoing_response_bytes_sent);
 
-	if (write_result == NETWORK_IO_PEER_CLOSED || write_result == NETWORK_IO_ERROR)
+	if (write_result == NETWORK_IO_PEER_CLOSED ||
+		write_result == NETWORK_IO_ERROR)
 		return -1;
 	if (write_result == NETWORK_IO_COMPLETE)
 		broker_connection_prepare_for_next_request(connection);
 	return 0;
 }
 
-static void broker_process_connection_events(struct broker *broker,
-											 struct broker_connection *connection,
-											 short revents)
+static void broker_process_connection_events(
+	struct broker *broker, struct broker_connection *connection, short revents)
 {
 	if (!broker || !connection || !connection->is_in_use)
 		return;
 	if ((revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
 		if (broker->log_client_io)
-			fprintf(stderr,
-					"[broker] client disconnected fd=%d\n",
-					connection->fd);
+			fprintf(
+				stderr, "[broker] client disconnected fd=%d\n", connection->fd);
 		broker_connection_reset_state(connection);
 		return;
 	}
@@ -913,8 +923,8 @@ int broker_run(struct broker *broker)
 		return -1;
 
 	while (!broker->stop_requested) {
-		nfds_t poll_count = broker_build_poll_descriptors(
-			broker, poll_fds, poll_connections);
+		nfds_t poll_count =
+			broker_build_poll_descriptors(broker, poll_fds, poll_connections);
 
 		int poll_result = poll(poll_fds, poll_count, 250);
 		if (poll_result < 0) {

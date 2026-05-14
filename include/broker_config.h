@@ -15,6 +15,7 @@ struct broker_config {
 	uint16_t replica_port;
 	size_t max_request_frame_bytes;
 	int log_topic_actions;
+	int log_consume_miss_actions;
 	int log_client_io;
 };
 
