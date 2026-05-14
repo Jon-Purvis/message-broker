@@ -74,6 +74,13 @@ int network_listen(uint16_t port);
  */
 int network_connect(const char *host, uint16_t port);
 
+/*
+ * Per-send/recv deadline so a dead peer cannot block failover indefinitely
+ * (half-open TCP after remote process exit).
+ */
+int network_set_stream_socket_io_timeouts(int fd,
+										  unsigned int timeout_seconds);
+
 int network_accept(int server_fd);
 
 int network_recv_packet(int client_fd, struct message *msg);

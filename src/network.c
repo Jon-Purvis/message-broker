@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <netdb.h>
 #include <zlib.h>
 
@@ -225,6 +226,30 @@ int network_connect(const char *host, uint16_t port)
 
 	freeaddrinfo(result);
 	return sockfd;
+}
+
+int network_set_stream_socket_io_timeouts(int fd,
+										  unsigned int timeout_seconds)
+{
+	struct timeval timeout;
+
+	if (fd < 0 || timeout_seconds == 0)
+		return -1;
+	timeout.tv_sec = (time_t)timeout_seconds;
+	timeout.tv_usec = 0;
+	if (setsockopt(fd,
+				   SOL_SOCKET,
+				   SO_RCVTIMEO,
+				   &timeout,
+				   (socklen_t)sizeof timeout) != 0)
+		return -1;
+	if (setsockopt(fd,
+				   SOL_SOCKET,
+				   SO_SNDTIMEO,
+				   &timeout,
+				   (socklen_t)sizeof timeout) != 0)
+		return -1;
+	return 0;
 }
 
 int network_listen(uint16_t port)

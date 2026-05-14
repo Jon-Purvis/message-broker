@@ -22,6 +22,16 @@ void broker_client_init(struct broker_client *client)
 	}
 }
 
+static void broker_client_apply_stream_timeouts_for_failover(int socket_fd)
+{
+	const unsigned int idle_peer_io_deadline_seconds = 30U;
+
+	if (socket_fd < 0)
+		return;
+	(void)network_set_stream_socket_io_timeouts(socket_fd,
+											 idle_peer_io_deadline_seconds);
+}
+
 void broker_client_close(struct broker_client *client)
 {
 	size_t i;
@@ -167,6 +177,7 @@ int broker_client_connect(struct broker_client *client,
 	}
 
 	client->fd = sockfd;
+	broker_client_apply_stream_timeouts_for_failover(sockfd);
 	client->host_index = 0;
 	return 0;
 }
@@ -213,6 +224,7 @@ int broker_client_connect_hosts(struct broker_client *client,
 
 		if (sockfd >= 0) {
 			client->fd = sockfd;
+			broker_client_apply_stream_timeouts_for_failover(sockfd);
 			client->host_index = i;
 			return 0;
 		}
@@ -239,6 +251,7 @@ static int broker_client_failover_to_next_host(struct broker_client *client)
 
 		if (sockfd >= 0) {
 			client->fd = sockfd;
+			broker_client_apply_stream_timeouts_for_failover(sockfd);
 			client->host_index = idx;
 			return 0;
 		}
