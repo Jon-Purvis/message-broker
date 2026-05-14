@@ -7,3 +7,4 @@
 *.a
 build/
 data/
+example-data/
