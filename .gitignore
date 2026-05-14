@@ -1,8 +1,7 @@
 .DS_Store
 
-broker.conf
-broker-cli.conf
-chat-client.conf
+*.conf
+!broker.conf.example
 
 *.o
 *.a
