@@ -265,6 +265,13 @@ static void broker_forward_replicate_produce(struct broker *broker,
 	if (resp.status_code != 0)
 		fprintf(
 			stderr, "replica: produce follower status=%d\n", resp.status_code);
+	else if (broker->log_topic_actions != 0)
+		fprintf(stderr,
+			"[broker] replica_ack produce topic=%s partition=%u offset=%" PRIu64
+			"\n",
+			topic->name,
+			(unsigned)partition_index,
+			(uint64_t)record->header.offset);
 	network_response_deinit(&resp);
 	close(fd);
 }
@@ -320,8 +327,14 @@ static void broker_forward_replicate_create_topic(struct broker *broker,
 	}
 	if (resp.status_code != 0)
 		fprintf(stderr,
-				"replica: create_topic follower status=%d\n",
-				resp.status_code);
+			"replica: create_topic follower status=%d\n",
+			resp.status_code);
+	else if (broker->log_topic_actions != 0)
+		fprintf(stderr,
+			"[broker] replica_ack create_topic topic=%.*s partitions=%u\n",
+			(int)src->header.topic_length,
+			(const char *)src->topic,
+			(unsigned)src->header.create_partition_count);
 	network_response_deinit(&resp);
 	close(fd);
 }
