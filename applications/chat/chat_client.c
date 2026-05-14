@@ -20,8 +20,7 @@
 #include "../../include/network.h"
 #include "../../include/record.h"
 
-#define DEFAULT_BROKER_HOST "127.0.0.1"
-#define DEFAULT_BROKER_PORT 3490
+#define DEFAULT_BROKER_ENDPOINTS "127.0.0.1:3490"
 #define DEFAULT_GROUP_PARTITION_COUNT 1
 
 #define MAX_DISPLAY_NAME_LENGTH 63
@@ -42,43 +41,9 @@ static const size_t default_group_count =
 	sizeof(default_group_names) / sizeof(default_group_names[0]);
 
 static volatile sig_atomic_t global_stop_flag = 0;
-/*
- * When set, consumer threads use broker_client_connect_hosts with this CSV
- * (same semantics as BROKER_HOSTS but sourced from broker.conf / chat-client.conf).
- * Owned for process lifetime; freed before main returns.
- */
-static char *chat_failover_hosts_from_config_file = NULL;
-
-static void chat_copy_first_host_from_csv(char *destination_buffer,
-					  size_t destination_length,
-					  const char *comma_separated_hosts)
-{
-	size_t segment_length;
-	size_t tail;
-
-	if (!destination_buffer || destination_length == 0 ||
-	    !comma_separated_hosts || comma_separated_hosts[0] == '\0')
-		return;
-
-	while (*comma_separated_hosts == ' ' || *comma_separated_hosts == '\t')
-		comma_separated_hosts++;
-
-	segment_length = strcspn(comma_separated_hosts, ",");
-	if (segment_length >= destination_length)
-		segment_length = destination_length - 1;
-	memcpy(destination_buffer, comma_separated_hosts, segment_length);
-	destination_buffer[segment_length] = '\0';
-
-	tail = segment_length;
-	while (tail > 0 &&
-	       isspace((unsigned char)destination_buffer[tail - 1])) {
-		destination_buffer[--tail] = '\0';
-	}
-}
 
 struct chat_consumer_thread_arguments {
-	char broker_host[256];
-	uint16_t broker_port;
+	char *broker_endpoints_owned;
 	char topic_name[MAX_GROUP_NAME_LENGTH + 1];
 	char display_name[MAX_DISPLAY_NAME_LENGTH + 1];
 };
@@ -164,41 +129,15 @@ static void *chat_consumer_thread_main(void *raw_arguments)
 											 arguments->display_name);
 
 	broker_client_init(&consumer_client);
-	{
-		const char *hosts_env_override = getenv("BROKER_HOSTS");
-
-		if (hosts_env_override != NULL && hosts_env_override[0] != '\0') {
-			if (broker_client_connect_hosts(
-					&consumer_client,
-					hosts_env_override,
-					arguments->broker_port) != 0) {
-				fprintf(stderr,
-						"[%s] consumer failed (BROKER_HOSTS)\n",
-						arguments->topic_name);
-				free(arguments);
-				return NULL;
-			}
-		} else if (chat_failover_hosts_from_config_file != NULL &&
-			   chat_failover_hosts_from_config_file[0] != '\0') {
-			if (broker_client_connect_hosts(
-					&consumer_client,
-					chat_failover_hosts_from_config_file,
-					arguments->broker_port) != 0) {
-				fprintf(stderr,
-						"[%s] consumer failed (config hosts list)\n",
-						arguments->topic_name);
-				free(arguments);
-				return NULL;
-			}
-		} else if (broker_client_connect(&consumer_client,
-						 arguments->broker_host,
-						 arguments->broker_port) != 0) {
-			fprintf(stderr,
-				"[%s] consumer failed to connect to broker\n",
-				arguments->topic_name);
-			free(arguments);
-			return NULL;
-		}
+	if (broker_client_connect_hosts(
+		    &consumer_client,
+		    arguments->broker_endpoints_owned) != 0) {
+		fprintf(stderr,
+			"[%s] consumer failed to connect to broker\n",
+			arguments->topic_name);
+		free(arguments->broker_endpoints_owned);
+		free(arguments);
+		return NULL;
 	}
 
 	while (!global_stop_flag) {
@@ -249,25 +188,27 @@ static void *chat_consumer_thread_main(void *raw_arguments)
 	}
 
 	broker_client_close(&consumer_client);
+	free(arguments->broker_endpoints_owned);
 	free(arguments);
 	return NULL;
 }
 
-static int chat_start_consumer_thread_for_group(const char *broker_host,
-												uint16_t broker_port,
-												const char *topic_name,
-												const char *display_name)
+static int chat_start_consumer_thread_for_group(
+	const char *session_broker_endpoints_csv,
+	const char *topic_name,
+	const char *display_name)
 {
 	struct chat_consumer_thread_arguments *arguments =
 		malloc(sizeof(*arguments));
 	if (!arguments)
 		return -1;
 
-	snprintf(arguments->broker_host,
-			 sizeof arguments->broker_host,
-			 "%s",
-			 broker_host);
-	arguments->broker_port = broker_port;
+	arguments->broker_endpoints_owned =
+		strdup(session_broker_endpoints_csv);
+	if (!arguments->broker_endpoints_owned) {
+		free(arguments);
+		return -1;
+	}
 	snprintf(arguments->topic_name,
 			 sizeof arguments->topic_name,
 			 "%s",
@@ -282,6 +223,7 @@ static int chat_start_consumer_thread_for_group(const char *broker_host,
 					   NULL,
 					   chat_consumer_thread_main,
 					   arguments) != 0) {
+		free(arguments->broker_endpoints_owned);
 		free(arguments);
 		return -1;
 	}
@@ -387,11 +329,11 @@ static int chat_handle_send_choice(
 									  message_text);
 }
 
-static int chat_handle_join_choice(const char *broker_host,
-								   uint16_t broker_port,
-								   const char *display_name,
-								   char joined_group_set[][MAX_GROUP_NAME_LENGTH + 1],
-								   size_t *joined_group_count_in_out)
+static int chat_handle_join_choice(
+	const char *session_broker_endpoints_csv,
+	const char *display_name,
+	char joined_group_set[][MAX_GROUP_NAME_LENGTH + 1],
+	size_t *joined_group_count_in_out)
 {
 	char target_group[MAX_GROUP_NAME_LENGTH + 1];
 	if (chat_prompt_line("Group to join (CMPS_340 / CMPS_352): ",
@@ -413,10 +355,9 @@ static int chat_handle_join_choice(const char *broker_host,
 		printf("joined-group limit reached\n");
 		return 0;
 	}
-	if (chat_start_consumer_thread_for_group(broker_host,
-											 broker_port,
-											 target_group,
-											 display_name) != 0) {
+	if (chat_start_consumer_thread_for_group(session_broker_endpoints_csv,
+						 target_group,
+						 display_name) != 0) {
 		fprintf(stderr, "failed to start consumer for %s\n", target_group);
 		return -1;
 	}
@@ -432,10 +373,13 @@ static int chat_handle_join_choice(const char *broker_host,
 int main(int argc, char *argv[])
 {
 	struct broker_client_settings connection_file_overlay;
-	char broker_host[256];
-	uint16_t broker_port;
+	char *config_endpoints_dup = NULL;
+	char *session_broker_endpoints = NULL;
+	char argv_endpoint_buf[512];
 
 	broker_client_settings_set_defaults(&connection_file_overlay);
+	if (!connection_file_overlay.broker_endpoints)
+		return 1;
 	{
 		int merge_broker_file_status =
 			broker_client_settings_merge_file(
@@ -464,165 +408,123 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	broker_port = connection_file_overlay.broker_port;
+	if (connection_file_overlay.broker_endpoints != NULL &&
+	    connection_file_overlay.broker_endpoints[0] != '\0') {
+		config_endpoints_dup =
+			strdup(connection_file_overlay.broker_endpoints);
+		if (config_endpoints_dup == NULL) {
+			broker_client_settings_destroy(&connection_file_overlay);
+			return 1;
+		}
+	}
+	broker_client_settings_destroy(&connection_file_overlay);
 
 	if (argc >= 2) {
-		snprintf(broker_host, sizeof broker_host, "%s", argv[1]);
-	} else if (connection_file_overlay.broker_hosts != NULL &&
-		   connection_file_overlay.broker_hosts[0] != '\0') {
-		chat_copy_first_host_from_csv(
-			broker_host,
-			sizeof broker_host,
-			connection_file_overlay.broker_hosts);
-	} else if (connection_file_overlay.broker_host != NULL &&
-		   connection_file_overlay.broker_host[0] != '\0') {
-		snprintf(broker_host,
-			 sizeof broker_host,
+		free(config_endpoints_dup);
+		config_endpoints_dup = NULL;
+		snprintf(argv_endpoint_buf,
+			 sizeof argv_endpoint_buf,
 			 "%s",
-			 connection_file_overlay.broker_host);
+			 argv[1]);
+		session_broker_endpoints = strdup(argv_endpoint_buf);
 	} else {
-		snprintf(broker_host,
-			 sizeof broker_host,
-			 "%s",
-			 DEFAULT_BROKER_HOST);
+		const char *env_endpoints = getenv("BROKER_ENDPOINTS");
+
+		if (env_endpoints != NULL && env_endpoints[0] != '\0')
+			session_broker_endpoints = strdup(env_endpoints);
+		else if (config_endpoints_dup != NULL)
+			session_broker_endpoints = config_endpoints_dup;
+		else
+			session_broker_endpoints =
+				strdup(DEFAULT_BROKER_ENDPOINTS);
+		if (session_broker_endpoints != config_endpoints_dup)
+			free(config_endpoints_dup);
+		config_endpoints_dup = NULL;
 	}
 
-	if (argc >= 3)
-		broker_port = (uint16_t)strtoul(argv[2], NULL, 10);
+	if (session_broker_endpoints == NULL) {
+		free(config_endpoints_dup);
+		return 1;
+	}
 
-	/* broker_client_connect_hosts copies this list internally; strdup only to
-	   survive destruction of overlay memory. */
-	{
-		char *hosts_csv_for_connections = NULL;
+	signal(SIGINT, chat_handle_sigint);
 
-		if (connection_file_overlay.broker_hosts != NULL &&
-		    connection_file_overlay.broker_hosts[0] != '\0') {
-			hosts_csv_for_connections =
-				strdup(connection_file_overlay.broker_hosts);
-			if (hosts_csv_for_connections == NULL) {
-				broker_client_settings_destroy(&connection_file_overlay);
-				return 1;
-			}
-		}
-		broker_client_settings_destroy(&connection_file_overlay);
-		signal(SIGINT, chat_handle_sigint);
+	char display_name[MAX_DISPLAY_NAME_LENGTH + 1];
+	struct broker_client producer_client;
 
-		char display_name[MAX_DISPLAY_NAME_LENGTH + 1];
-		struct broker_client producer_client;
+	if (chat_prompt_line("Enter your display name: ",
+			     display_name,
+			     sizeof display_name) != 0 ||
+	    display_name[0] == '\0') {
+		fprintf(stderr, "display name required\n");
+		free(session_broker_endpoints);
+		return 1;
+	}
 
-		const char *hosts_env_override = getenv("BROKER_HOSTS");
+	broker_client_init(&producer_client);
 
-		if (chat_prompt_line("Enter your display name: ",
-				     display_name,
-				     sizeof display_name) != 0 ||
-		    display_name[0] == '\0') {
-			fprintf(stderr, "display name required\n");
-			free(hosts_csv_for_connections);
-			return 1;
-		}
-
-		broker_client_init(&producer_client);
-
-		if (hosts_env_override != NULL && hosts_env_override[0] != '\0') {
-			if (broker_client_connect_hosts(
-				    &producer_client,
-				    hosts_env_override,
-				    broker_port) != 0) {
-				fprintf(
-					stderr,
-					"could not connect to any broker in BROKER_HOSTS\n");
-				free(hosts_csv_for_connections);
-				broker_client_close(&producer_client);
-				return 1;
-			}
-		} else if (hosts_csv_for_connections != NULL) {
-			if (broker_client_connect_hosts(&producer_client,
-							hosts_csv_for_connections,
-							broker_port) != 0) {
-				fprintf(stderr,
-					"could not connect hosts from config "
-					"file list\n");
-				free(hosts_csv_for_connections);
-				broker_client_close(&producer_client);
-				return 1;
-			}
-			chat_failover_hosts_from_config_file =
-				hosts_csv_for_connections;
-			hosts_csv_for_connections = NULL;
-		} else if (broker_client_connect(
-				   &producer_client,
-				   broker_host,
-				   broker_port) != 0) {
-			fprintf(stderr,
-				"could not connect to broker at %s:%u\n",
-				broker_host,
-				(unsigned)broker_port);
-			free(hosts_csv_for_connections);
-			broker_client_close(&producer_client);
-			return 1;
-		}
-
-		free(hosts_csv_for_connections);
-
-		if (chat_ensure_topics_exist(&producer_client) != 0) {
-			free(chat_failover_hosts_from_config_file);
-			chat_failover_hosts_from_config_file = NULL;
-			broker_client_close(&producer_client);
-			return 1;
-		}
-
-		/* Every client auto-subscribes to the always-on CMPS group, mirroring the
-		 * original server's behavior of placing newly-registered users in CMPS. */
-		if (chat_start_consumer_thread_for_group(
-			    broker_host, broker_port, "CMPS", display_name) !=
-		    0) {
-			fprintf(stderr, "failed to start consumer for CMPS\n");
-			free(chat_failover_hosts_from_config_file);
-			chat_failover_hosts_from_config_file = NULL;
-			broker_client_close(&producer_client);
-			return 1;
-		}
-
-		char joined_group_set[MAX_JOINED_GROUPS][MAX_GROUP_NAME_LENGTH +
-							 1];
-		size_t joined_group_count = 0;
-		snprintf(joined_group_set[joined_group_count++],
-			 MAX_GROUP_NAME_LENGTH + 1,
-			 "%s",
-			 "CMPS");
-
-		while (!global_stop_flag) {
-			chat_print_main_menu();
-			int menu_choice = chat_read_menu_choice();
-
-			switch (menu_choice) {
-			case 1:
-				(void)chat_handle_send_choice(&producer_client,
-							      display_name,
-							      joined_group_set,
-							      joined_group_count);
-				break;
-			case 2:
-				(void)chat_handle_join_choice(broker_host,
-							      broker_port,
-							      display_name,
-							      joined_group_set,
-							      &joined_group_count);
-				break;
-			case 3:
-				global_stop_flag = 1;
-				break;
-			default:
-				printf("invalid choice\n");
-			}
-		}
-
+	if (broker_client_connect_hosts(&producer_client,
+					session_broker_endpoints) != 0) {
+		fprintf(stderr,
+			"could not connect to any broker in endpoint list\n");
 		broker_client_close(&producer_client);
-		/* Detached consumer threads observe the stop flag on their next poll
-		 * cycle; give them a moment to drain before the process exits. */
-		usleep(CONSUMER_POLL_INTERVAL_MICROSECONDS * 4);
-		free(chat_failover_hosts_from_config_file);
-		chat_failover_hosts_from_config_file = NULL;
-		return 0;
+		free(session_broker_endpoints);
+		return 1;
 	}
+
+	if (chat_ensure_topics_exist(&producer_client) != 0) {
+		broker_client_close(&producer_client);
+		free(session_broker_endpoints);
+		return 1;
+	}
+
+	/* Every client auto-subscribes to the always-on CMPS group, mirroring the
+	 * original server's behavior of placing newly-registered users in CMPS. */
+	if (chat_start_consumer_thread_for_group(session_broker_endpoints,
+						 "CMPS",
+						 display_name) != 0) {
+		fprintf(stderr, "failed to start consumer for CMPS\n");
+		broker_client_close(&producer_client);
+		free(session_broker_endpoints);
+		return 1;
+	}
+
+	char joined_group_set[MAX_JOINED_GROUPS][MAX_GROUP_NAME_LENGTH + 1];
+	size_t joined_group_count = 0;
+	snprintf(joined_group_set[joined_group_count++],
+		 MAX_GROUP_NAME_LENGTH + 1,
+		 "%s",
+		 "CMPS");
+
+	while (!global_stop_flag) {
+		chat_print_main_menu();
+		int menu_choice = chat_read_menu_choice();
+
+		switch (menu_choice) {
+		case 1:
+			(void)chat_handle_send_choice(&producer_client,
+						      display_name,
+						      joined_group_set,
+						      joined_group_count);
+			break;
+		case 2:
+			(void)chat_handle_join_choice(session_broker_endpoints,
+						      display_name,
+						      joined_group_set,
+						      &joined_group_count);
+			break;
+		case 3:
+			global_stop_flag = 1;
+			break;
+		default:
+			printf("invalid choice\n");
+		}
+	}
+
+	broker_client_close(&producer_client);
+	/* Detached consumer threads observe the stop flag on their next poll
+	 * cycle; give them a moment to drain before the process exits. */
+	usleep(CONSUMER_POLL_INTERVAL_MICROSECONDS * 4);
+	free(session_broker_endpoints);
+	return 0;
 }

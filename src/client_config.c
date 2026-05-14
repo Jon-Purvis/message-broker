@@ -32,30 +32,6 @@ static char *broker_client_settings_trim_inplace(char *text)
 	return text;
 }
 
-static int broker_client_settings_parse_listen_port_string(
-	const char *value_text,
-	uint16_t *listen_port_output)
-{
-	char *invalid_character_pointer = NULL;
-	unsigned long numeric_value_parsed;
-
-	if (!value_text || !listen_port_output || value_text[0] == '\0')
-		return -1;
-
-	errno = 0;
-	numeric_value_parsed =
-		strtoul(value_text, &invalid_character_pointer, 10);
-	if (errno != 0 ||
-	    invalid_character_pointer == value_text ||
-	    *invalid_character_pointer != '\0')
-		return -1;
-	if (numeric_value_parsed == 0UL ||
-	    numeric_value_parsed > 65535UL)
-		return -1;
-	*listen_port_output = (uint16_t)numeric_value_parsed;
-	return 0;
-}
-
 static int broker_client_settings_apply_line(struct broker_client_settings *settings,
 					     char *line_buffer)
 {
@@ -80,33 +56,14 @@ static int broker_client_settings_apply_line(struct broker_client_settings *sett
 	if (key_token[0] == '\0')
 		return -1;
 
-	if (strcasecmp(key_token, "host") == 0 ||
-	    strcasecmp(key_token, "broker_host") == 0) {
-		broker_client_settings_free_owned_string(&settings->broker_host);
+	if (strcasecmp(key_token, "brokers") == 0 ||
+	    strcasecmp(key_token, "broker") == 0) {
+		broker_client_settings_free_owned_string(&settings->broker_endpoints);
 		if (value_token[0] != '\0') {
-			settings->broker_host = strdup(value_token);
-			if (!settings->broker_host)
+			settings->broker_endpoints = strdup(value_token);
+			if (!settings->broker_endpoints)
 				return -1;
 		}
-		return 0;
-	}
-
-	if (strcasecmp(key_token, "hosts") == 0 ||
-	    strcasecmp(key_token, "broker_hosts") == 0) {
-		broker_client_settings_free_owned_string(&settings->broker_hosts);
-		if (value_token[0] != '\0') {
-			settings->broker_hosts = strdup(value_token);
-			if (!settings->broker_hosts)
-				return -1;
-		}
-		return 0;
-	}
-
-	if (strcasecmp(key_token, "port") == 0 ||
-	    strcasecmp(key_token, "listen_port") == 0) {
-		if (broker_client_settings_parse_listen_port_string(
-			    value_token, &settings->broker_port) != 0)
-			return -1;
 		return 0;
 	}
 
@@ -119,16 +76,16 @@ void broker_client_settings_set_defaults(
 	if (!settings)
 		return;
 	memset(settings, 0, sizeof(*settings));
-	settings->broker_host = strdup("127.0.0.1");
-	settings->broker_port = 3490;
+	settings->broker_endpoints = strdup("127.0.0.1:3490");
+	if (!settings->broker_endpoints)
+		return;
 }
 
 void broker_client_settings_destroy(struct broker_client_settings *settings)
 {
 	if (!settings)
 		return;
-	broker_client_settings_free_owned_string(&settings->broker_host);
-	broker_client_settings_free_owned_string(&settings->broker_hosts);
+	broker_client_settings_free_owned_string(&settings->broker_endpoints);
 	memset(settings, 0, sizeof(*settings));
 }
 
@@ -169,24 +126,12 @@ int broker_client_connect_with_settings(
 	struct broker_client *client,
 	const struct broker_client_settings *settings)
 {
-	const char *single_broker_host;
-
 	if (!client || !settings)
 		return -1;
-
-	if (settings->broker_hosts && settings->broker_hosts[0] != '\0')
-		return broker_client_connect_hosts(client,
-						   settings->broker_hosts,
-						   settings->broker_port);
-
-	single_broker_host =
-		(settings->broker_host && settings->broker_host[0] != '\0')
-			? settings->broker_host
-			: "127.0.0.1";
-
-	return broker_client_connect(client,
-				     single_broker_host,
-				     settings->broker_port);
+	if (!settings->broker_endpoints ||
+	    settings->broker_endpoints[0] == '\0')
+		return -1;
+	return broker_client_connect_hosts(client, settings->broker_endpoints);
 }
 
 int broker_client_connect_via_config_file(struct broker_client *client,
@@ -201,6 +146,8 @@ int broker_client_connect_via_config_file(struct broker_client *client,
 	int tcp_connect_outcome;
 
 	broker_client_settings_set_defaults(&loaded_settings);
+	if (!loaded_settings.broker_endpoints)
+		return -1;
 	merge_status = broker_client_settings_merge_file(path_used_for_merge,
 							 &loaded_settings);
 	if (merge_status == -1 || merge_status == -3)

@@ -72,8 +72,7 @@ static int require_connected(struct broker_client *client)
 int main(void)
 {
 	struct broker_client client;
-	char host_saved[256] = "127.0.0.1";
-	uint16_t port_saved = 3490;
+	char endpoint_saved[256] = "127.0.0.1:3490";
 
 	broker_client_init(&client);
 
@@ -98,23 +97,22 @@ int main(void)
 
 		switch (menu_choice) {
 		case 1: {
-			char host_input[256];
-			char port_input[64];
+			char endpoint_input[256];
 
-			read_line("Host [127.0.0.1]: ", host_input, sizeof host_input);
-			if (host_input[0] != '\0') {
-				strncpy(host_saved, host_input, sizeof host_saved - 1);
-				host_saved[sizeof host_saved - 1] = '\0';
+			read_line("Broker host:port [127.0.0.1:3490]: ",
+				  endpoint_input,
+				  sizeof endpoint_input);
+			if (endpoint_input[0] != '\0') {
+				strncpy(endpoint_saved,
+					endpoint_input,
+					sizeof endpoint_saved - 1);
+				endpoint_saved[sizeof endpoint_saved - 1] = '\0';
 			}
-			read_line("Port [3490]: ", port_input, sizeof port_input);
-			if (port_input[0] != '\0')
-				port_saved = (uint16_t)strtoul(port_input, NULL, 10);
 
-			if (broker_client_connect(&client, host_saved, port_saved) != 0)
+			if (broker_client_connect(&client, endpoint_saved) != 0)
 				fprintf(stderr, "connect failed\n");
 			else
-				printf("Connected to %s:%u\n", host_saved,
-					   (unsigned)port_saved);
+				printf("Connected to %s\n", endpoint_saved);
 			break;
 		}
 		case 2: {

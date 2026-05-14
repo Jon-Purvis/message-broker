@@ -1,3 +1,4 @@
+#include <errno.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -15,9 +16,10 @@ void broker_client_init(struct broker_client *client)
 	client->fd = -1;
 	client->host_count = 0;
 	client->host_index = 0;
-	client->port = 0;
-	for (i = 0; i < BROKER_CLIENT_MAX_HOSTS; i++)
+	for (i = 0; i < BROKER_CLIENT_MAX_HOSTS; i++) {
 		client->hosts[i] = NULL;
+		client->endpoint_ports[i] = 0;
+	}
 }
 
 void broker_client_close(struct broker_client *client)
@@ -33,40 +35,85 @@ void broker_client_close(struct broker_client *client)
 	for (i = 0; i < BROKER_CLIENT_MAX_HOSTS; i++) {
 		free(client->hosts[i]);
 		client->hosts[i] = NULL;
+		client->endpoint_ports[i] = 0;
 	}
 	client->host_count = 0;
 	client->host_index = 0;
 }
 
-int broker_client_connect(struct broker_client *client,
-						  const char *host,
-						  uint16_t port)
+static int broker_client_parse_decimal_port(const char *port_text,
+											uint16_t *port_out)
 {
-	int sockfd;
+	char *end_pointer = NULL;
+	unsigned long parsed;
 
-	if (!client || !host)
+	if (!port_text || !port_out || port_text[0] == '\0')
 		return -1;
-
-	broker_client_close(client);
-
-	client->hosts[0] = strdup(host);
-	if (!client->hosts[0])
+	errno = 0;
+	parsed = strtoul(port_text, &end_pointer, 10);
+	if (errno != 0 || end_pointer == port_text || *end_pointer != '\0')
 		return -1;
-	client->host_count = 1;
-	client->host_index = 0;
-	client->port = port;
-
-	sockfd = network_connect(host, port);
-	if (sockfd < 0) {
-		broker_client_close(client);
+	if (parsed == 0UL || parsed > 65535UL)
 		return -1;
-	}
-
-	client->fd = sockfd;
+	*port_out = (uint16_t)parsed;
 	return 0;
 }
 
-static void broker_client_trim_host_token(char *token)
+static int broker_client_split_host_port_spec(const char *spec,
+											  char **hostname_out,
+											  uint16_t *port_out)
+{
+	const char *colon;
+	size_t host_byte_count;
+	char *host_heap;
+
+	if (!spec || !hostname_out || !port_out || spec[0] == '\0')
+		return -1;
+	*hostname_out = NULL;
+
+	if (spec[0] == '[') {
+		const char *close_bracket = strchr(spec + 1, ']');
+
+		if (!close_bracket || close_bracket == spec + 1)
+			return -1;
+		host_byte_count = (size_t)(close_bracket - (spec + 1));
+		if (close_bracket[1] == '\0')
+			return -1;
+		if (close_bracket[1] != ':' || close_bracket[2] == '\0')
+			return -1;
+		if (broker_client_parse_decimal_port(close_bracket + 2, port_out) != 0)
+			return -1;
+		host_heap = malloc(host_byte_count + 1);
+		if (!host_heap)
+			return -1;
+		memcpy(host_heap, spec + 1, host_byte_count);
+		host_heap[host_byte_count] = '\0';
+		*hostname_out = host_heap;
+		return 0;
+	}
+
+	colon = strchr(spec, ':');
+	if (!colon)
+		return -1;
+	if (strchr(colon + 1, ':') != NULL)
+		return -1;
+	if (colon == spec)
+		return -1;
+	if (colon[1] == '\0')
+		return -1;
+	if (broker_client_parse_decimal_port(colon + 1, port_out) != 0)
+		return -1;
+	host_byte_count = (size_t)(colon - spec);
+	host_heap = malloc(host_byte_count + 1);
+	if (!host_heap)
+		return -1;
+	memcpy(host_heap, spec, host_byte_count);
+	host_heap[host_byte_count] = '\0';
+	*hostname_out = host_heap;
+	return 0;
+}
+
+static void broker_client_trim_token_inplace(char *token)
 {
 	char *end;
 
@@ -77,48 +124,92 @@ static void broker_client_trim_host_token(char *token)
 		*--end = '\0';
 }
 
+static int broker_client_push_parsed_endpoint(struct broker_client *client,
+											  const char *token)
+{
+	char *hostname = NULL;
+	uint16_t port_value;
+
+	if (!client || !token || token[0] == '\0')
+		return -1;
+	if (client->host_count >= BROKER_CLIENT_MAX_HOSTS)
+		return -1;
+	if (broker_client_split_host_port_spec(token, &hostname, &port_value) !=
+		0) {
+		free(hostname);
+		return -1;
+	}
+	client->hosts[client->host_count] = hostname;
+	client->endpoint_ports[client->host_count] = port_value;
+	client->host_count++;
+	return 0;
+}
+
+int broker_client_connect(struct broker_client *client,
+						  const char *host_port_spec)
+{
+	int sockfd;
+
+	if (!client || !host_port_spec || host_port_spec[0] == '\0')
+		return -1;
+
+	broker_client_close(client);
+
+	if (broker_client_push_parsed_endpoint(client, host_port_spec) != 0) {
+		broker_client_close(client);
+		return -1;
+	}
+
+	sockfd = network_connect(client->hosts[0], client->endpoint_ports[0]);
+	if (sockfd < 0) {
+		broker_client_close(client);
+		return -1;
+	}
+
+	client->fd = sockfd;
+	client->host_index = 0;
+	return 0;
+}
+
 int broker_client_connect_hosts(struct broker_client *client,
-								const char *comma_separated_hosts,
-								uint16_t port)
+								const char *comma_separated_host_port_specs)
 {
 	char *buffer = NULL;
 	char *cursor = NULL;
 	char *saveptr = NULL;
 
-	if (!client || !comma_separated_hosts || comma_separated_hosts[0] == '\0')
+	if (!client || !comma_separated_host_port_specs ||
+		comma_separated_host_port_specs[0] == '\0')
 		return -1;
 
 	broker_client_close(client);
-	client->port = port;
 
-	buffer = strdup(comma_separated_hosts);
+	buffer = strdup(comma_separated_host_port_specs);
 	if (!buffer)
 		return -1;
 
 	for (cursor = strtok_r(buffer, ",", &saveptr);
 		 cursor != NULL && client->host_count < BROKER_CLIENT_MAX_HOSTS;
 		 cursor = strtok_r(NULL, ",", &saveptr)) {
-		char *host_copy;
-
-		broker_client_trim_host_token(cursor);
+		broker_client_trim_token_inplace(cursor);
 		if (cursor[0] == '\0')
 			continue;
-
-		host_copy = strdup(cursor);
-		if (!host_copy) {
+		if (broker_client_push_parsed_endpoint(client, cursor) != 0) {
 			free(buffer);
 			broker_client_close(client);
 			return -1;
 		}
-		client->hosts[client->host_count++] = host_copy;
 	}
 	free(buffer);
 
-	if (client->host_count == 0)
+	if (client->host_count == 0) {
+		broker_client_close(client);
 		return -1;
+	}
 
 	for (size_t i = 0; i < client->host_count; i++) {
-		int sockfd = network_connect(client->hosts[i], client->port);
+		int sockfd =
+			network_connect(client->hosts[i], client->endpoint_ports[i]);
 
 		if (sockfd >= 0) {
 			client->fd = sockfd;
@@ -143,7 +234,8 @@ static int broker_client_failover_to_next_host(struct broker_client *client)
 
 	for (size_t step = 1; step < client->host_count; step++) {
 		size_t idx = (client->host_index + step) % client->host_count;
-		int sockfd = network_connect(client->hosts[idx], client->port);
+		int sockfd =
+			network_connect(client->hosts[idx], client->endpoint_ports[idx]);
 
 		if (sockfd >= 0) {
 			client->fd = sockfd;
@@ -179,7 +271,8 @@ static int broker_client_do_request(struct broker_client *client,
 	return 0;
 }
 
-static size_t broker_client_failover_attempt_limit(const struct broker_client *client)
+static size_t
+broker_client_failover_attempt_limit(const struct broker_client *client)
 {
 	if (!client || client->host_count == 0)
 		return 1;

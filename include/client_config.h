@@ -6,9 +6,7 @@
 #include "client.h"
 
 struct broker_client_settings {
-	char *broker_host;
-	char *broker_hosts;
-	uint16_t broker_port;
+	char *broker_endpoints;
 };
 
 void broker_client_settings_set_defaults(

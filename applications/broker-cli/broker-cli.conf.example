@@ -1,9 +1,5 @@
-# Client-side settings consumed by libmessagebroker (unknown keys ignored).
-# Copy next to broker_cli cwd as broker.conf, or merge into repo-root broker.conf.
-#
-# cp applications/broker-cli/broker-cli.conf.example ./broker.conf
+# client-side settings consumed by libmessagebroker (unknown keys ignored).
+# copy next to broker_cli cwd as broker.conf, or merge into repo-root broker.conf.
 
-host = 127.0.0.1
-# hosts = 192.168.1.11,192.168.1.12
-
-port = 3490
+brokers = 127.0.0.1:3490
+#brokers = 127.0.0.1:3490,127.0.0.1:3491

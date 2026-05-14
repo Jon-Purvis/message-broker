@@ -11,23 +11,18 @@
 struct broker_client {
 	int fd;
 	char *hosts[BROKER_CLIENT_MAX_HOSTS];
+	uint16_t endpoint_ports[BROKER_CLIENT_MAX_HOSTS];
 	size_t host_count;
 	size_t host_index;
-	uint16_t port;
 };
 
 void broker_client_init(struct broker_client *client);
 
 int broker_client_connect(struct broker_client *client,
-						  const char *host,
-						  uint16_t port);
+						  const char *host_port_spec);
 
-/*
- * comma-separated hosts (e.g. "192.168.1.11,192.168.1.12")
- */
 int broker_client_connect_hosts(struct broker_client *client,
-								const char *comma_separated_hosts,
-								uint16_t port);
+								const char *comma_separated_host_port_specs);
 
 void broker_client_close(struct broker_client *client);
 

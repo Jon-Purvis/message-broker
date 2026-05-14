@@ -1,27 +1,26 @@
-# Copy to broker.conf and adjust (paths relative to cwd).
+# copy to broker.conf and adjust (paths relative to cwd).
+# broker reads only server keys; libmessagebroker reads only client keys.
 
-# ── Daemon (broker binary) ──────────────────────────────────────────
+# server keys
+
 data_dir = ./data
 listen_port = 3490
 
-# Optional follower URL (omit or blank to disable leader → follower forwarding).
+# optional follower URL (omit or blank to disable leader -> follower forwarding).
 replica_host =
-# If unset or zero, defaults to listen_port when replica_host is set.
+# if zero, defaults to listen_port when replica_host is set.
 replica_port = 0
 
-# Cap wire request size (header + topic + key + payload), bytes.
+# limit wire request size (header + topic + key + payload), bytes.
 max_request_frame_bytes = 1048576
 
 log_topic_actions = true
+log_consume_miss_actions = false
 log_client_io = true
 
-# ── Client library (same file ignored keys per side) ─────────────────
-# Broker reads only server keys; libmessagebroker reads only keys below.
+# client keys
 
-# Either a single hostname:
-host = 127.0.0.1
-# Or failover list (if non-empty this wins over single host above):
-#hosts = 192.168.1.11,192.168.1.12
-
-# Connecting to broker: use `port`, or omit to inherit `listen_port` above via shared file merge.
-port = 3490
+# comma-separated host:port (IPv6 must be [addr]:port)
+# only one address is strictly necessary
+brokers = 127.0.0.1:3490
+#brokers = 127.0.0.1:3490,127.0.0.1:3491
